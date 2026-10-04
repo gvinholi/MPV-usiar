@@ -562,3 +562,18 @@ Decisões da orquestração em `collector.application`. Não substituem as seç�
 * Retry somente para falhas transitórias: timeout, transporte, HTTP 429 e HTTP 5xx. Sem retry para 4xx permanentes, JSON inválido ou payload inválido. Política configurável (`max_attempts`, atraso inicial, fator, teto). A espera é injetável; a implementação padrão usa `time.sleep`. Sem suporte a `Retry-After` neste commit (exigiria alterar o contrato de `PncpHttpError`).
 * Limite máximo de páginas por consulta (`max_pages`, default 200) é proteção técnica contra loop ou metadados incorretos, não regra de negócio. Atingir o limite sem término natural deixa a coleta incompleta.
 * Não há rate limiting nem intervalo fixo entre requisições bem-sucedidas neste estágio.
+
+---
+
+## 25. Mapeamento PNCP → domínio
+
+Decisões do adaptador `collector.infra.pncp.mapper`. Não substituem as seções anteriores.
+
+* A tradução de um item `data[]` para `domain.Process` vive na fronteira PNCP (`map_pncp_publication`). O domínio não conhece nomes da API. O paginador continua devolvendo a representação externa.
+* Identidade oficial: `numeroControlePNCP` → `SourceIdentity(Source.PNCP, official_id)`. UUID interno é gerado por chamada (`uuid4`) ou recebido do chamador. Sem UUID determinístico e sem deduplicação.
+* Campos PNCP utilizados: `numeroControlePNCP`, `orgaoEntidade.cnpj`, `orgaoEntidade.razaoSocial`, `objetoCompra`, `modalidadeNome`, `dataPublicacaoPncp`, `dataEncerramentoProposta`, `unidadeOrgao.ufSigla`, `unidadeOrgao.municipioNome`, `valorTotalEstimado`. Demais campos permanecem fora do domínio.
+* Ausência legítima vira `None`. Não se inventam textos como "Não informado".
+* Datas: o manual oficial declara `dataAberturaProposta` e `dataEncerramentoProposta` como horário de Brasília. As strings observadas não têm offset. Strings sem offset recebem UTC−03:00 (horário oficial de Brasília; sem horário de verão desde 2019), não porque a consulta tenha `uf=SP`. Offset explícito é preservado. `captured_at` é injetado, timezone-aware, e preenche primeira e última captura na primeira transformação. Sem pacote `tzdata`.
+* URL: endpoint da API (`/api/consulta/v1/orgaos/{cnpj}/compras/{ano}/{sequencial}`) ≠ página pública navegável. `linkSistemaOrigem` e `linkProcessoEletronico` também não são promovidos a `official_url`. O mapper deixa `official_url=None` até o commit de documentos/editais. Nenhuma rota de frontend (`/app/editais/...`) foi inferida. `build_pncp_api_resource_url` monta só o recurso técnico da API, sem alimentar o domínio.
+* Valor estimado: `Decimal`, sem conversão via `float` como tipo intermediário inventado; números JSON já materializados em `float` usam `Decimal(str(value))`. Payload monetário inválido gera `PncpInvalidMoneyError`.
+* Erros de mapeamento: `PncpMissingFieldError`, `PncpInvalidTypeError`, `PncpInvalidDateError`, `PncpInvalidMoneyError`, `PncpInvalidIdentityError`. Não vazam `KeyError`/`ValueError`/`TypeError` como contrato.

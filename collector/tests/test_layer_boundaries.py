@@ -35,6 +35,25 @@ def test_domain_does_not_import_application_or_infra() -> None:
     assert violations == []
 
 
+PNCP_FIELD_NAMES = (
+    "numeroControlePNCP",
+    "orgaoEntidade",
+    "dataPublicacaoPncp",
+    "objetoCompra",
+    "valorTotalEstimado",
+)
+
+
+def test_domain_does_not_mention_pncp_field_names() -> None:
+    violations: list[str] = []
+    for path in _python_files(DOMAIN_ROOT):
+        text = path.read_text(encoding="utf-8")
+        for name in PNCP_FIELD_NAMES:
+            if name in text:
+                violations.append(f"{path.relative_to(DOMAIN_ROOT)}: {name}")
+    assert violations == []
+
+
 def test_domain_imports_only_stdlib_and_own_package() -> None:
     allowed_roots = set(sys.stdlib_module_names) | {"collector"}
     violations: list[str] = []
