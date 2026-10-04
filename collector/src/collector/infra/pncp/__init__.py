@@ -18,6 +18,7 @@ from collector.infra.pncp.errors import (
 from collector.infra.pncp.fetcher import PncpPublicationFetcher
 from collector.infra.pncp.mapper import map_pncp_publication
 from collector.infra.pncp.models import PncpPublicationPage
+from collector.infra.pncp.publication_mapper import PncpPublicationMapper
 from collector.infra.pncp.api_resource_url import build_pncp_api_resource_url
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "PncpMappingError",
     "PncpMissingFieldError",
     "PncpPublicationFetcher",
+    "PncpPublicationMapper",
     "PncpPublicationPage",
     "PncpTimeoutError",
     "PncpTransportError",

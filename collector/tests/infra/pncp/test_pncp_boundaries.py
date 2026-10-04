@@ -25,7 +25,7 @@ def _imported_modules(path: Path) -> list[str]:
 def test_pncp_non_mapper_modules_do_not_import_domain() -> None:
     violations: list[str] = []
     for path in sorted(PNCP_ROOT.rglob("*.py")):
-        if path.name == "mapper.py":
+        if path.name in {"mapper.py", "publication_mapper.py"}:
             continue
         for module in _imported_modules(path):
             if module.startswith("collector.domain"):

@@ -577,3 +577,18 @@ Decisões do adaptador `collector.infra.pncp.mapper`. Não substituem as seçõe
 * URL: endpoint da API (`/api/consulta/v1/orgaos/{cnpj}/compras/{ano}/{sequencial}`) ≠ página pública navegável. `linkSistemaOrigem` e `linkProcessoEletronico` também não são promovidos a `official_url`. O mapper deixa `official_url=None` até o commit de documentos/editais. Nenhuma rota de frontend (`/app/editais/...`) foi inferida. `build_pncp_api_resource_url` monta só o recurso técnico da API, sem alimentar o domínio.
 * Valor estimado: `Decimal`, sem conversão via `float` como tipo intermediário inventado; números JSON já materializados em `float` usam `Decimal(str(value))`. Payload monetário inválido gera `PncpInvalidMoneyError`.
 * Erros de mapeamento: `PncpMissingFieldError`, `PncpInvalidTypeError`, `PncpInvalidDateError`, `PncpInvalidMoneyError`, `PncpInvalidIdentityError`. Não vazam `KeyError`/`ValueError`/`TypeError` como contrato.
+
+---
+
+## 26. Orquestração multi-modalidade
+
+Decisões de `collector.application.collection`. Não substituem as seções anteriores.
+
+* O orquestrador (`CollectionOrchestrator`) executa uma coleta lógica: inicia `CollectionRound` em `RUNNING`, percorre as modalidades da request em sequência, pagina cada uma, mapeia itens via porta `PublicationMapper` e finaliza a rodada. Sem fail-fast global: falha em uma modalidade não impede as seguintes.
+* Modalidades vêm só do chamador. Duplicatas na request são rejeitadas (não normalizadas), para não executar a mesma consulta duas vezes e não confundir a observação de duplicatas da fonte.
+* Status da rodada: `SUCCESS` se todas as modalidades pedidas foram paginadas e mapeadas com sucesso, inclusive com zero registros. `PARTIAL` se houve falha ou item inválido, mas alguma parte útil foi obtida (modalidade completa, itens brutos ou processos mapeados). `FAILED` só quando nenhuma modalidade produziu coleta útil. Zero oportunidades válidas não é `FAILED`.
+* Erro de mapper em um item: registra modalidade, índice e identidade disponível; preserva os demais itens; marca a modalidade incompleta; a rodada pode ficar `PARTIAL`. Não se inventa `Process` inválido.
+* Paginação incompleta: mapeia os itens já obtidos, registra página/razão, marca a modalidade incompleta e segue.
+* Duplicatas de `numeroControlePNCP` entre modalidades/páginas são preservadas neste estágio. `unique_processes` permanece 0 — deduplicação ainda não existe.
+* Métricas preenchidas: `pages_processed`, `pages_with_error` (falhas de página), `records_collected` (itens brutos), `errors` (paginação + mapeamento). Candidatos/selecionados/documentos ficam 0.
+* Relógio injetável; um `captured_at` timezone-aware por rodada, aplicado a todos os processos. Sem `datetime.now()` espalhado no orquestrador.
