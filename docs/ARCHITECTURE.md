@@ -522,3 +522,16 @@ Não misture infraestrutura, domínio e interface.
 Não avance automaticamente para o próximo commit.
 
 O objetivo é construir um sistema pequeno, auditável, testável e expansível.
+
+---
+
+## 22. Modelo de domínio da coleta
+
+Decisões do modelo de domínio. Não substituem as seções anteriores.
+
+* **Fonte:** `Enum` com `PNCP` e `RHS`. É suficiente neste estágio: o conjunto de fontes é fechado e novas fontes só entram como membros quando o acesso for aprovado. Não usar strings soltas como `"pncp"`. Não há membro genérico "outras".
+* **Identidade do processo:** UUID interno do sistema e uma ou mais identidades oficiais (`fonte` + identificador oficial da fonte). Título e número visível do edital não são identidade. O mesmo UUID interno pode reunir identidades de fontes distintas; o algoritmo de deduplicação não faz parte deste modelo.
+* **Timestamps:** timezone-aware. O domínio não assume `America/Sao_Paulo`. Conversão para exibição fica nas bordas.
+* **Rodada:** `SUCCESS` com zero registros coletados é distinto de `FAILED` e de `PARTIAL`. O status declara o desfecho da execução; as métricas não são inferidas a partir do status.
+* **Métricas:** representação de contadores; sem cálculo automático.
+* **Triagem:** estados `RAW`, `UNIQUE`, `CANDIDATE`, `SELECTED`, `PENDING`, `DISCARDED`, `CONFIRMED`. Motivo de descarte ou pendência é um campo opcional. As regras USIAR não estão neste modelo.
