@@ -1,6 +1,7 @@
 """Adaptador HTTP da API pública de consulta do PNCP."""
 
 from collector.infra.pncp.client import DEFAULT_BASE_URL, PncpClient
+from collector.infra.pncp.fetcher import PncpPublicationFetcher
 from collector.infra.pncp.errors import (
     PncpError,
     PncpHttpError,
@@ -14,6 +15,7 @@ from collector.infra.pncp.models import PncpPublicationPage
 __all__ = [
     "DEFAULT_BASE_URL",
     "PncpClient",
+    "PncpPublicationFetcher",
     "PncpError",
     "PncpHttpError",
     "PncpInvalidJsonError",

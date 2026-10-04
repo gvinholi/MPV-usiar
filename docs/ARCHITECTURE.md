@@ -548,3 +548,17 @@ Decisões do adaptador `collector.infra.pncp`. Não substituem as seções anter
 * A resposta é `PncpPublicationPage` (contrato da fonte em `infra`). Itens em `data` permanecem no formato JSON do PNCP.
 * Dependência HTTP: `httpx`. Sem credenciais; `Accept: application/json` e `User-Agent` configurável.
 * HTTP 200 é sucesso com corpo JSON. HTTP 204 No Content é sucesso sem conteúdo: página vazia (`data` vazia, contadores zerados, `empty=True`, `numero_pagina` da página solicitada), sem parse de JSON. Qualquer outro status vira erro explícito e não pode ser lido como zero oportunidades. 204 descreve só aquela chamada, não o desfecho de uma rodada multi-modalidade.
+
+---
+
+## 24. Paginação e resiliência
+
+Decisões da orquestração em `collector.application`. Não substituem as seções anteriores.
+
+* A paginação sequencial vive em `application`, não no domínio e não em `PncpClient`. O cliente continua devolvendo uma página por chamada.
+* A aplicação depende da porta `PublicationPageFetcher`. `PncpPublicationFetcher` (infra) adapta `PncpClient` e classifica erros. A aplicação não importa `httpx` nem tipos internos do cliente.
+* HTTP 204 na primeira página encerra a consulta com sucesso e zero itens. 204/vazio inesperado depois de páginas que ainda indicavam restante é coleta incompleta, não sucesso.
+* Falha definitiva após retries (ou inconsistência de metadados, ou limite técnico) levanta `IncompleteCollectionError` com o progresso parcial. O retorno normal de `collect()` só ocorre quando `complete is True`. Páginas já obtidas não são descartadas nem apresentadas como coleta completa.
+* Retry somente para falhas transitórias: timeout, transporte, HTTP 429 e HTTP 5xx. Sem retry para 4xx permanentes, JSON inválido ou payload inválido. Política configurável (`max_attempts`, atraso inicial, fator, teto). A espera é injetável; a implementação padrão usa `time.sleep`. Sem suporte a `Retry-After` neste commit (exigiria alterar o contrato de `PncpHttpError`).
+* Limite máximo de páginas por consulta (`max_pages`, default 200) é proteção técnica contra loop ou metadados incorretos, não regra de negócio. Atingir o limite sem término natural deixa a coleta incompleta.
+* Não há rate limiting nem intervalo fixo entre requisições bem-sucedidas neste estágio.

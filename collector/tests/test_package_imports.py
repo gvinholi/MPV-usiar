@@ -4,6 +4,7 @@ import collector
 import collector.application
 import collector.domain
 import collector.infra
+import collector.infra.pncp
 
 
 def test_collector_package_is_importable() -> None:
@@ -20,3 +21,7 @@ def test_application_package_is_importable() -> None:
 
 def test_infra_package_is_importable() -> None:
     assert collector.infra.__name__ == "collector.infra"
+
+
+def test_pncp_package_is_importable() -> None:
+    assert collector.infra.pncp.__name__ == "collector.infra.pncp"
