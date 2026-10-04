@@ -7,7 +7,7 @@ name = "collector"
 version = "0.1.0"
 description = "Coletor de oportunidades de licitação (PNCP) para o perfil USIAR"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = ["httpx"]
 
 [project.optional-dependencies]
 dev = ["pytest"]

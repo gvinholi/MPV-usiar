@@ -535,3 +535,16 @@ Decisões do modelo de domínio. Não substituem as seções anteriores.
 * **Rodada:** `SUCCESS` com zero registros coletados é distinto de `FAILED` e de `PARTIAL`. O status declara o desfecho da execução; as métricas não são inferidas a partir do status.
 * **Métricas:** representação de contadores; sem cálculo automático.
 * **Triagem:** estados `RAW`, `UNIQUE`, `CANDIDATE`, `SELECTED`, `PENDING`, `DISCARDED`, `CONFIRMED`. Motivo de descarte ou pendência é um campo opcional. As regras USIAR não estão neste modelo.
+
+---
+
+## 23. Cliente HTTP PNCP
+
+Decisões do adaptador `collector.infra.pncp`. Não substituem as seções anteriores.
+
+* A URL base oficial é `https://pncp.gov.br/api/consulta`, configurável no construtor. O path deste commit é `GET /v1/contratacoes/publicacao`.
+* O cliente aceita `date` e formata `AAAAMMDD`. Não hard-code de UF (incluindo `SP`).
+* Uma chamada busca exatamente uma página. Paginação automática, retry e mapeamento para `domain.Process` ficam para commits posteriores.
+* A resposta é `PncpPublicationPage` (contrato da fonte em `infra`). Itens em `data` permanecem no formato JSON do PNCP.
+* Dependência HTTP: `httpx`. Sem credenciais; `Accept: application/json` e `User-Agent` configurável.
+* HTTP 200 é sucesso com corpo JSON. HTTP 204 No Content é sucesso sem conteúdo: página vazia (`data` vazia, contadores zerados, `empty=True`, `numero_pagina` da página solicitada), sem parse de JSON. Qualquer outro status vira erro explícito e não pode ser lido como zero oportunidades. 204 descreve só aquela chamada, não o desfecho de uma rodada multi-modalidade.
