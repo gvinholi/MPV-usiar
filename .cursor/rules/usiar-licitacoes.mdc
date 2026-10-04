@@ -1,0 +1,37 @@
+---
+description: Contrato do projeto de automação de licitações USIAR — limites de escopo, camadas e commits
+alwaysApply: true
+---
+
+# Automação de Licitações — Usinaria
+
+O contrato oficial está em `docs/ARCHITECTURE.md`. Não altere arquitetura, tecnologias ou regras de negócio sem explicar o motivo e pedir aprovação.
+
+## Não fazer
+
+- Não invente requisitos nem simplifique regras de negócio.
+- Não introduza biblioteca ou serviço sem justificar.
+- Não misture `collector.domain`, `collector.application` e `collector.infra`.
+- Não implemente lances, propostas, pregões, envio a clientes, descarte por valor/distância/prazo, dependência da RHS ou IA no MVP.
+- Não avance automaticamente para o próximo commit.
+
+## Camadas
+
+- `domain`: regras e conceitos; sem I/O e sem fornecedor de banco.
+- `application`: casos de uso; depende do domínio, não de adaptadores concretos.
+- `infra`: adaptadores (PNCP, storage, banco).
+
+Regras de perfil (USIAR) são configuráveis — não espalhe termos em condicionais.
+
+## Commits
+
+Um commit por vez, escopo pequeno e testável. Antes: objetivo, arquivos, implementação, testes. Depois: resumo, mensagem sugerida, parar e aguardar aprovação.
+
+```text
+# ❌ BAD
+if "manutenção" in titulo and valor < 10000:
+    descartar()
+
+# ✅ GOOD
+decisao = perfil.avaliar(publicacao)
+```
