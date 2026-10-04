@@ -12,6 +12,12 @@ from collector.application.collection.results import (
     CollectionResult,
     ModalityOutcome,
 )
+from collector.application.consolidation import (
+    ConsolidatedProcess,
+    ConsolidationError,
+    ConsolidationResult,
+    ProcessConsolidator,
+)
 
 __all__ = [
     "CollectionIssue",
@@ -19,7 +25,11 @@ __all__ = [
     "CollectionRequest",
     "CollectionRequestError",
     "CollectionResult",
+    "ConsolidatedProcess",
+    "ConsolidationError",
+    "ConsolidationResult",
     "ModalityOutcome",
+    "ProcessConsolidator",
     "PublicationMapper",
     "PublicationMappingError",
 ]

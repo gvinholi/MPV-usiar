@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from collector.application.consolidation.results import ConsolidationResult
 from collector.domain import CollectionRound, Process
 
 
@@ -40,3 +41,4 @@ class CollectionResult:
     records_received: int
     processes_mapped: int
     errors: tuple[CollectionIssue, ...]
+    consolidation: ConsolidationResult

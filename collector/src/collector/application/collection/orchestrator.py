@@ -13,6 +13,7 @@ from collector.application.collection.results import (
     CollectionResult,
     ModalityOutcome,
 )
+from collector.application.consolidation import ProcessConsolidator
 from collector.application.publications.errors import IncompleteCollectionError
 from collector.application.publications.paginator import PublicationPaginator
 from collector.application.publications.query import PublicationQuery
@@ -28,10 +29,12 @@ class CollectionOrchestrator:
         paginator: PublicationPaginator,
         mapper: PublicationMapper,
         *,
+        consolidator: ProcessConsolidator | None = None,
         clock: Clock = utc_now,
     ) -> None:
         self._paginator = paginator
         self._mapper = mapper
+        self._consolidator = consolidator or ProcessConsolidator()
         self._clock = clock
 
     def collect(self, request: CollectionRequest) -> CollectionResult:
@@ -49,7 +52,8 @@ class CollectionOrchestrator:
             outcomes.append(outcome)
             issues.extend(modality_issues)
 
-        metrics = _round_metrics(outcomes, issues)
+        consolidation = self._consolidator.consolidate(processes)
+        metrics = _round_metrics(outcomes, issues, consolidation.unique_processes)
         status = _round_status(outcomes, processes)
         finished = running.finish(
             status, ended_at=self._clock(), metrics=metrics
@@ -70,6 +74,7 @@ class CollectionOrchestrator:
             records_received=sum(outcome.records_received for outcome in outcomes),
             processes_mapped=len(processes),
             errors=tuple(issues),
+            consolidation=consolidation,
         )
 
     def _collect_modality(
@@ -156,12 +161,14 @@ class CollectionOrchestrator:
 def _round_metrics(
     outcomes: list[ModalityOutcome],
     issues: list[CollectionIssue],
+    unique_processes: int,
 ) -> RoundMetrics:
     pages_with_error = sum(1 for issue in issues if issue.kind == "pagination")
     return RoundMetrics(
         pages_processed=sum(outcome.pages_processed for outcome in outcomes),
         pages_with_error=pages_with_error,
         records_collected=sum(outcome.records_received for outcome in outcomes),
+        unique_processes=unique_processes,
         errors=len(issues),
     )
 

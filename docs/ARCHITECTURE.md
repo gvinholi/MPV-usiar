@@ -589,6 +589,22 @@ Decisões de `collector.application.collection`. Não substituem as seções ant
 * Status da rodada: `SUCCESS` se todas as modalidades pedidas foram paginadas e mapeadas com sucesso, inclusive com zero registros. `PARTIAL` se houve falha ou item inválido, mas alguma parte útil foi obtida (modalidade completa, itens brutos ou processos mapeados). `FAILED` só quando nenhuma modalidade produziu coleta útil. Zero oportunidades válidas não é `FAILED`.
 * Erro de mapper em um item: registra modalidade, índice e identidade disponível; preserva os demais itens; marca a modalidade incompleta; a rodada pode ficar `PARTIAL`. Não se inventa `Process` inválido.
 * Paginação incompleta: mapeia os itens já obtidos, registra página/razão, marca a modalidade incompleta e segue.
-* Duplicatas de `numeroControlePNCP` entre modalidades/páginas são preservadas neste estágio. `unique_processes` permanece 0 — deduplicação ainda não existe.
-* Métricas preenchidas: `pages_processed`, `pages_with_error` (falhas de página), `records_collected` (itens brutos), `errors` (paginação + mapeamento). Candidatos/selecionados/documentos ficam 0.
+* Duplicatas de `numeroControlePNCP` entre modalidades/páginas continuam nas observações brutas (`CollectionResult.processes`). A consolidação posterior calcula `unique_processes` sobre esse conjunto.
+* Métricas preenchidas: `pages_processed`, `pages_with_error` (falhas de página), `records_collected` (itens brutos), `unique_processes` (grupos consolidados da rodada), `errors` (paginação + mapeamento). Candidatos/selecionados/pendentes/descartados/documentos ficam 0.
 * Relógio injetável; um `captured_at` timezone-aware por rodada, aplicado a todos os processos. Sem `datetime.now()` espalhado no orquestrador.
+
+---
+
+## 27. Identidade, deduplicação e consolidação
+
+Decisões de `collector.application.consolidation`. Não substituem as seções anteriores.
+
+* **Observação** é uma ocorrência recebida na coleta (processo já mapeado). **Processo único** é o grupo consolidado das observações com identidade externa comprovadamente igual. A visão consolidada não substitui as observações.
+* **Identidade externa** é `SourceIdentity(source, official_id)`. Para o PNCP: `Source.PNCP` + `numeroControlePNCP`. UUID interno não é chave de deduplicação e não é regenerado: o grupo herda o UUID do processo representativo.
+* Deduplicação neste commit é **exata e conservadora**. Sem fuzzy matching. Sem equivalência inferida por título, descrição, CNPJ, valor, datas, número visível do edital ou similaridade textual.
+* Sem matching cruzado inferido entre fontes. `PNCP/ABC` e `RHS/XYZ` só se unem se alguma observação do conjunto comprovar interseção exata de identidades.
+* Agrupamento: componentes conectados por interseção exata de `SourceIdentity`. Se A compartilha identidade com B e B compartilha outra com C, A/B/C formam um único grupo. Uma observação que liga grupos antes separados une o componente; isso não é equivalência inventada — é o fecho transitivo da identidade comprovada.
+* Representante do grupo: a observação com `last_captured_at` mais recente. Empate (incluindo ambos ausentes) preserva a ordem de entrada. As demais observações permanecem no grupo para auditoria. Sem merge campo a campo.
+* Resultado auditável (`ConsolidationResult`): observações recebidas, processos únicos, duplicatas (`observações − grupos`), grupos e a relação grupo → observações. Ordem determinística: grupos na ordem da primeira observação do componente; observações internas na ordem de entrada.
+* Integração: modalidades → paginação → mapper → observações → consolidação → resultado da rodada. `CollectionResult.processes` continua sendo as observações brutas; `CollectionResult.consolidation` é a visão consolidada. `CollectionRound.metrics.unique_processes` passa a ser a quantidade de grupos. Em rodada `PARTIAL`, esse número cobre só o conjunto efetivamente observado.
+* Falha estrutural da consolidação levanta `ConsolidationError` e impede que a rodada seja marcada `SUCCESS`. Sem persistência, histórico entre rodadas ou merge persistente.

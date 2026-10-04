@@ -8,6 +8,8 @@ from collector.application import (
     CollectionOrchestrator,
     CollectionRequest,
     CollectionRequestError,
+    ConsolidationError,
+    ProcessConsolidator,
     PublicationPaginator,
     RetryPolicy,
     TransientFetchError,
@@ -56,6 +58,14 @@ def test_single_modality_success() -> None:
     assert len(mapper.calls) == 1
     assert mapper.calls[0][1] == CAPTURED
     assert result.processes[0].first_captured_at == CAPTURED
+    assert result.collection_round.metrics.unique_processes == 1
+    assert result.consolidation.unique_processes == 1
+    assert result.consolidation.observations_received == 1
+    assert result.collection_round.metrics.candidates == 0
+    assert result.collection_round.metrics.selected == 0
+    assert result.collection_round.metrics.pending == 0
+    assert result.collection_round.metrics.discarded == 0
+    assert result.collection_round.metrics.documents_found == 0
 
 
 def test_multiple_modalities_preserve_order() -> None:
@@ -77,6 +87,9 @@ def test_multiple_modalities_preserve_order() -> None:
     assert fetcher.calls == [(8, 1), (1, 1)]
     assert result.requested_modalities == (8, 1)
     assert all(captured == CAPTURED for _item, captured in mapper.calls)
+    assert result.collection_round.metrics.unique_processes == 3
+    assert result.consolidation.duplicates == 0
+    assert result.processes_mapped == 3
 
 
 def test_empty_modality_and_all_empty_are_success() -> None:
@@ -133,7 +146,8 @@ def test_partial_pagination_maps_collected_items() -> None:
     assert result.collection_round.metrics.pages_processed == 2
     assert result.collection_round.metrics.pages_with_error == 1
     assert result.collection_round.metrics.records_collected == 2
-    assert result.collection_round.metrics.unique_processes == 0
+    assert result.collection_round.metrics.unique_processes == 2
+    assert result.collection_round.status is RoundStatus.PARTIAL
 
 
 def test_mapping_error_keeps_valid_items_and_is_partial() -> None:
@@ -235,7 +249,83 @@ def test_duplicate_official_ids_are_preserved() -> None:
         "dup-1",
     ]
     assert result.processes[0].id != result.processes[1].id
-    assert result.collection_round.metrics.unique_processes == 0
+    assert result.collection_round.metrics.unique_processes == 1
+    assert result.consolidation.duplicates == 1
+    assert len(result.consolidation.groups) == 1
+    assert len(result.consolidation.groups[0].observations) == 2
+
+
+def test_round_without_duplicates_exposes_raw_and_consolidated_views() -> None:
+    fetcher = ModalityFetcher(
+        pages={
+            1: {1: page(1, items=({"numeroControlePNCP": "a"},), total_paginas=1)},
+            6: {1: page(1, items=({"numeroControlePNCP": "b"},), total_paginas=1)},
+        }
+    )
+    service, _mapper = _orchestrator(fetcher)
+    result = service.collect(_request(1, 6))
+
+    assert result.collection_round.status is RoundStatus.SUCCESS
+    assert result.processes_mapped == 2
+    assert result.collection_round.metrics.records_collected == 2
+    assert result.collection_round.metrics.unique_processes == 2
+    assert result.consolidation.observations_received == 2
+    assert result.consolidation.unique_processes == 2
+    assert result.consolidation.duplicates == 0
+    assert [process.source_identities[0].official_id for process in result.processes] == [
+        "a",
+        "b",
+    ]
+    assert [group.process.source_identities[0].official_id for group in result.consolidation.groups] == [
+        "a",
+        "b",
+    ]
+
+
+def test_partial_round_with_duplicates_keeps_raw_observations() -> None:
+    same = {"numeroControlePNCP": "dup-parcial"}
+    fetcher = ModalityFetcher(
+        pages={
+            1: {1: page(1, items=(same,), total_paginas=1)},
+            6: {
+                1: page(1, items=(same,), total_paginas=2, total_registros=2),
+            },
+        },
+        errors={6: {2: [TransientFetchError("timeout")]}},
+    )
+    service, _mapper = _orchestrator(fetcher)
+    result = service.collect(_request(1, 6))
+
+    assert result.collection_round.status is RoundStatus.PARTIAL
+    assert result.incomplete_modalities == (6,)
+    assert len(result.processes) == 2
+    assert result.processes_mapped == 2
+    assert result.collection_round.metrics.records_collected == 2
+    assert result.collection_round.metrics.unique_processes == 1
+    assert result.consolidation.duplicates == 1
+    assert result.consolidation.groups[0].observations == result.processes
+    assert result.collection_round.metrics.candidates == 0
+
+
+def test_consolidation_failure_is_not_success() -> None:
+    class FailingConsolidator(ProcessConsolidator):
+        def consolidate(self, processes):  # type: ignore[no-untyped-def]
+            raise ConsolidationError("falha estrutural na consolidação")
+
+    fetcher = ModalityFetcher(
+        pages={1: {1: page(1, items=({"numeroControlePNCP": "a"},), total_paginas=1)}}
+    )
+    mapper = RecordingMapper()
+    _, waiter = recording_waiter()
+    paginator = PublicationPaginator(
+        fetcher, retry_policy=RetryPolicy(max_attempts=1), waiter=waiter
+    )
+    service = CollectionOrchestrator(
+        paginator, mapper, consolidator=FailingConsolidator(), clock=lambda: CAPTURED
+    )
+
+    with pytest.raises(ConsolidationError, match="falha estrutural"):
+        service.collect(_request(1))
 
 
 def test_invalid_period() -> None:
