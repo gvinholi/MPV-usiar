@@ -162,3 +162,83 @@ class ProcessObservationRow(Base):
     collection_round: Mapped[CollectionRoundRow] = relationship(
         back_populates="observations"
     )
+    evaluations: Mapped[list[ScreeningEvaluationRow]] = relationship(
+        back_populates="observation"
+    )
+
+
+class ScreeningProfileRow(Base):
+    __tablename__ = "screening_profiles"
+    __table_args__ = (
+        UniqueConstraint("code", "version", name="uq_screening_profiles_code_version"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[str] = mapped_column(Text, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    configuration: Mapped[dict[str, list[str]]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    evaluations: Mapped[list[ScreeningEvaluationRow]] = relationship(
+        back_populates="profile"
+    )
+
+
+class ScreeningEvaluationRow(Base):
+    __tablename__ = "screening_evaluations"
+    __table_args__ = (
+        UniqueConstraint(
+            "observation_id",
+            "profile_id",
+            "engine_version",
+            name="uq_screening_evaluations_observation_profile_engine",
+        ),
+        CheckConstraint(
+            "state IN ('CANDIDATE', 'PENDING', 'DISCARDED')",
+            name="state",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    process_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("processes.id"), nullable=False, index=True
+    )
+    observation_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("process_observations.id"), nullable=False, index=True
+    )
+    profile_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("screening_profiles.id"), nullable=False, index=True
+    )
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_code: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_text: Mapped[str] = mapped_column(Text, nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    engine_version: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    process: Mapped[ProcessRow] = relationship()
+    observation: Mapped[ProcessObservationRow] = relationship(
+        back_populates="evaluations"
+    )
+    profile: Mapped[ScreeningProfileRow] = relationship(back_populates="evaluations")
+    evidence: Mapped[list[ScreeningEvidenceRow]] = relationship(
+        back_populates="evaluation"
+    )
+
+
+class ScreeningEvidenceRow(Base):
+    __tablename__ = "screening_evidence"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    evaluation_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("screening_evaluations.id"), nullable=False, index=True
+    )
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    configured_term: Mapped[str] = mapped_column(Text, nullable=False)
+    field: Mapped[str] = mapped_column(Text, nullable=False)
+    matched_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    evaluation: Mapped[ScreeningEvaluationRow] = relationship(back_populates="evidence")

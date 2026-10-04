@@ -57,7 +57,7 @@ docker compose down
 
 `DATABASE_URL` é a única variável de conexão. A aplicação lê essa variável num único ponto de infra.
 
-Coleta e persistência são passos separados: `collect()` não grava no banco.
+Coleta, persistência e triagem são passos separados: `collect()` não grava no banco; `ScreeningEngine.evaluate()` não executa SQL.
 
 ## Camadas do coletor
 

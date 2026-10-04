@@ -24,6 +24,9 @@ def test_expected_tables_exist(db_session: Session) -> None:
         "processes",
         "source_identities",
         "process_observations",
+        "screening_profiles",
+        "screening_evaluations",
+        "screening_evidence",
     }.issubset(names)
     assert "licitacoes" not in names
 
@@ -39,6 +42,8 @@ def test_unique_constraints_exist(db_session: Session) -> None:
     assert "uq_source_identities_source_official" in names
     assert "uq_modality_outcomes_round_code" in names
     assert "uq_process_observations_round_process" in names
+    assert "uq_screening_profiles_code_version" in names
+    assert "uq_screening_evaluations_observation_profile_engine" in names
 
 
 def test_foreign_keys_exist(db_session: Session) -> None:

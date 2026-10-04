@@ -626,3 +626,20 @@ Decisões de `collector.application.persistence` e `collector.infra.database`. N
 * Resolução cross-round: busca todas as identidades do grupo. Nenhuma existente → cria processo com o UUID do representante e associa identidades. Existentes no mesmo processo → reutiliza e anexa identidades novas. Existentes em processos distintos → `IdentityConflictError`, sem escolha silenciosa.
 * Uma persistência = uma transação. Falha estrutural faz ROLLBACK. Exceções de driver viram `PersistenceError`; a causa técnica permanece encadeada.
 * Schema de produção vem do Alembic. Desenvolvimento local: PostgreSQL 16 via Docker Compose (porta hospedeira 5433) e `DATABASE_URL`. Sem Supabase e sem Cloud SQL neste estágio.
+
+---
+
+## 29. Perfil USIAR e motor de triagem
+
+Decisões de `collector.application.screening`. Não substituem as seções anteriores.
+
+* Fluxo: coleta → consolidação → persistência → observação → avaliação por perfil. Coleta e triagem permanecem operações separadas. O motor não executa SQL.
+* USIAR é o primeiro `ScreeningProfile` (`USIAR/v1`). Termos ficam na configuração do perfil, não no algoritmo. Outro perfil reutiliza o mesmo motor.
+* O motor é determinístico, explicável e sem IA, embeddings, fuzzy matching ou análise de PDF/edital. Analisa só `description` do snapshot. Descrição vazia → `PENDING / EMPTY_DESCRIPTION`.
+* Normalização: caixa, acentos, hífen, barra e pontuação simples; casamento por tokens consecutivos, sem substring dentro de outra palavra.
+* Estados automáticos possíveis: `CANDIDATE`, `PENDING`, `DISCARDED`. O motor não atribui `SELECTED` nem `CONFIRMED`.
+* O estado comercial pertence à **avaliação** (`screening_evaluations`), não ao processo persistente. Um processo pode ser descartado para USIAR v1 e reavaliado em v2 ou em outro perfil. Avaliações antigas não são sobrescritas.
+* Precedência centralizada em `decide()`: serviço relevante (contexto HVAC + manutenção/higienização) → `CANDIDATE`; o mesmo com instalação ou compra/peças → `PENDING` (misto, sem descarte); só instalação, só peças ou só compra em contexto HVAC → `DISCARDED` isolado (peças prevalecem sobre “aquisição/fornecimento” genérico); só contexto HVAC, ou serviço sem contexto HVAC mas com instalação/compra/peças → `PENDING` ambíguo; nenhum sinal do perfil → `DISCARDED / NO_RELEVANT_SCOPE`. Valor, município, modalidade e prazo não entram na decisão.
+* Reason codes estáveis separados do texto humano. Evidências em tabela filha (`screening_evidence`): categoria, termo configurado, campo e texto casado.
+* Persistência: `screening_profiles` com `UNIQUE(code, version)` e JSONB da configuração; `screening_evaluations` com `UNIQUE(observation_id, profile_id, engine_version)`; mesma observação + nova versão do perfil cria nova avaliação.
+* Métricas `candidates`/`pending`/`discarded` da rodada **não** são atualizadas neste commit. Rodadas já persistidas permanecem históricas. Integração futura deve calcular esses contadores a partir das avaliações da rodada/perfil, sem reescrever a rodada em silêncio.
