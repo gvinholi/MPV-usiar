@@ -6,7 +6,7 @@ import ast
 from pathlib import Path
 
 APPLICATION_ROOT = Path(__file__).resolve().parents[2] / "src" / "collector" / "application"
-FORBIDDEN_PREFIXES = ("collector.infra", "httpx")
+FORBIDDEN_PREFIXES = ("collector.infra", "httpx", "sqlalchemy", "alembic", "psycopg")
 
 
 def _imported_modules(path: Path) -> list[str]:

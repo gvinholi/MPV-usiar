@@ -39,14 +39,31 @@ cd collector
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-python -m pytest
+python -m pytest -m "not postgres"
 ```
+
+## PostgreSQL local
+
+O banco de desenvolvimento sobe com Docker Compose na porta **5433** (para não conflitar com um PostgreSQL local na 5432). Copie `.env.example` para `.env` e ajuste se necessário. Não commite `.env`.
+
+```powershell
+docker compose up -d
+cd collector
+$env:DATABASE_URL = "postgresql+psycopg://usiar:usiar@localhost:5433/usiar"
+alembic upgrade head
+python -m pytest -m postgres
+docker compose down
+```
+
+`DATABASE_URL` é a única variável de conexão. A aplicação lê essa variável num único ponto de infra.
+
+Coleta e persistência são passos separados: `collect()` não grava no banco.
 
 ## Camadas do coletor
 
 * `collector.domain` — conceitos e regras de negócio; sem I/O e sem fornecedor.
 * `collector.application` — orquestração de casos de uso; depende do domínio, não de adaptadores concretos.
-* `collector.infra` — adaptadores (PNCP, armazenamento, banco). Vazio neste estágio.
+* `collector.infra` — adaptadores (PNCP e PostgreSQL).
 
 ## Segurança
 

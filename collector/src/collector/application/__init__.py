@@ -18,6 +18,15 @@ from collector.application.collection import (
     PublicationMapper,
     PublicationMappingError,
 )
+from collector.application.persistence import (
+    CollectionRepository,
+    IdentityConflictError,
+    IncompatibleRoundError,
+    PersistCollection,
+    PersistOutcome,
+    PersistenceError,
+    resolve_identities,
+)
 from collector.application.publications import (
     DEFAULT_MAX_PAGES,
     FetchError,
@@ -37,15 +46,21 @@ __all__ = [
     "CollectionOrchestrator",
     "CollectionRequest",
     "CollectionRequestError",
+    "CollectionRepository",
     "CollectionResult",
     "ConsolidatedProcess",
     "ConsolidationError",
     "ConsolidationResult",
     "DEFAULT_MAX_PAGES",
     "FetchError",
+    "IdentityConflictError",
+    "IncompatibleRoundError",
     "IncompleteCollectionError",
     "ModalityOutcome",
     "PermanentFetchError",
+    "PersistCollection",
+    "PersistOutcome",
+    "PersistenceError",
     "ProcessConsolidator",
     "PublicationCollection",
     "PublicationMapper",
@@ -56,4 +71,5 @@ __all__ = [
     "PublicationQuery",
     "RetryPolicy",
     "TransientFetchError",
+    "resolve_identities",
 ]

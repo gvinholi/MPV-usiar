@@ -608,3 +608,21 @@ Decisões de `collector.application.consolidation`. Não substituem as seções 
 * Resultado auditável (`ConsolidationResult`): observações recebidas, processos únicos, duplicatas (`observações − grupos`), grupos e a relação grupo → observações. Ordem determinística: grupos na ordem da primeira observação do componente; observações internas na ordem de entrada.
 * Integração: modalidades → paginação → mapper → observações → consolidação → resultado da rodada. `CollectionResult.processes` continua sendo as observações brutas; `CollectionResult.consolidation` é a visão consolidada. `CollectionRound.metrics.unique_processes` passa a ser a quantidade de grupos. Em rodada `PARTIAL`, esse número cobre só o conjunto efetivamente observado.
 * Falha estrutural da consolidação levanta `ConsolidationError` e impede que a rodada seja marcada `SUCCESS`. Sem persistência, histórico entre rodadas ou merge persistente.
+
+---
+
+## 28. Persistência PostgreSQL e histórico
+
+Decisões de `collector.application.persistence` e `collector.infra.database`. Não substituem as seções anteriores. Cloud SQL não é decisão deste commit.
+
+* PostgreSQL é a fonte de verdade persistente no coletor. Acesso Python: SQLAlchemy 2.x, Alembic e `psycopg` 3. O domínio não importa SQLAlchemy, Alembic nem psycopg. A aplicação não importa psycopg nem SQLAlchemy. Modelos ORM não substituem `domain.Process`.
+* Coleta e persistência são operações separadas: `orchestrator.collect(request)` depois `PersistCollection.persist(result)`. O orquestrador não grava no banco.
+* **Processo** persistente (`processes`) é só a identidade interna (UUID, `created_at`, `updated_at`). Campos mutáveis da fonte não ficam aí.
+* **Identidade externa** (`source_identities`): `UNIQUE(source, official_id)`. Uma identidade exata pertence a um único processo. Texto com CHECK (`PNCP`, `RHS`), sem ENUM nativo do PostgreSQL.
+* **Observação** (`process_observations`) é snapshot append-only da rodada. `CollectionResult.processes` continua com as observações brutas em memória. A persistência guarda **um** snapshot por processo consolidado por rodada: o representante do Commit 07. `UNIQUE(round_id, process_id)`. Métricas da rodada seguem distinguindo registros brutos e processos únicos.
+* **Rodada** usa `CollectionRound.id` como PK. Métricas principais são colunas explícitas, não JSON. Status e fonte são texto com CHECK. `finished_at` corresponde a `ended_at` do domínio.
+* **Resultado de modalidade** (`collection_modality_outcomes`): `UNIQUE(round_id, modality_code)`. Erros de mapeamento em JSONB estruturado.
+* Histórico entre rodadas: mesma identidade reutiliza o processo e cria nova observação. Reexecutar o mesmo `CollectionResult` é idempotente (mesma rodada, sem duplicar). Rodada já persistida com estado diferente levanta `IncompatibleRoundError`.
+* Resolução cross-round: busca todas as identidades do grupo. Nenhuma existente → cria processo com o UUID do representante e associa identidades. Existentes no mesmo processo → reutiliza e anexa identidades novas. Existentes em processos distintos → `IdentityConflictError`, sem escolha silenciosa.
+* Uma persistência = uma transação. Falha estrutural faz ROLLBACK. Exceções de driver viram `PersistenceError`; a causa técnica permanece encadeada.
+* Schema de produção vem do Alembic. Desenvolvimento local: PostgreSQL 16 via Docker Compose (porta hospedeira 5433) e `DATABASE_URL`. Sem Supabase e sem Cloud SQL neste estágio.

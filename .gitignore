@@ -1,6 +1,9 @@
 # Ambiente e credenciais
 .env
 .env.*
+!.env.example
+*.dump
+*.sql.gz
 
 # Python
 .venv/

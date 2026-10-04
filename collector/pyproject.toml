@@ -7,7 +7,12 @@ name = "collector"
 version = "0.1.0"
 description = "Coletor de oportunidades de licitação (PNCP) para o perfil USIAR"
 requires-python = ">=3.13"
-dependencies = ["httpx"]
+dependencies = [
+    "httpx",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+]
 
 [project.optional-dependencies]
 dev = ["pytest"]
@@ -18,3 +23,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "postgres: requer PostgreSQL real via DATABASE_URL",
+]
