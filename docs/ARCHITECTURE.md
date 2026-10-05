@@ -334,6 +334,8 @@ Guardar:
 * versão quando disponível;
 * localização no armazenamento quando aplicável.
 
+O contrato observado da API de arquivos e a persistência do catálogo estão na seção 30. Neste commit não há download automático nem armazenamento de binários.
+
 ---
 
 ## 13. Planilha
@@ -643,3 +645,20 @@ Decisões de `collector.application.screening`. Não substituem as seções ante
 * Reason codes estáveis separados do texto humano. Evidências em tabela filha (`screening_evidence`): categoria, termo configurado, campo e texto casado.
 * Persistência: `screening_profiles` com `UNIQUE(code, version)` e JSONB da configuração; `screening_evaluations` com `UNIQUE(observation_id, profile_id, engine_version)`; mesma observação + nova versão do perfil cria nova avaliação.
 * Métricas `candidates`/`pending`/`discarded` da rodada **não** são atualizadas neste commit. Rodadas já persistidas permanecem históricas. Integração futura deve calcular esses contadores a partir das avaliações da rodada/perfil, sem reescrever a rodada em silêncio.
+
+---
+
+## 30. Catálogo de documentos PNCP
+
+Decisões de `collector.application.documents` e `collector.infra.pncp` (cliente de documentos). Não substituem as seções anteriores.
+
+* Endpoint **observado** (não inventado): `GET https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos`. A API de consulta (`https://pncp.gov.br/api/consulta`) responde 404 neste path. O Swagger de consulta não lista `/arquivos`.
+* Resposta observada: lista JSON (não o envelope `{documentos: [...]}` do manual de integração). Cada item tem `sequencialDocumento`, `titulo`, `url`, `uri`, `tipoDocumentoId`, `tipoDocumentoNome`, `tipoDocumentoDescricao`, `dataPublicacaoPncp`, `statusAtivo`, `cnpj`, `anoCompra`, `sequencialCompra`.
+* `https://pncp.gov.br/pncp-api/v1/...` também responde, mas devolve URL com porta interna; o cliente usa `/api/pncp`.
+* Identidade documental: `Source.PNCP` + `{cnpj}/{ano}/{sequencial}/{sequencialDocumento}`. `sequencialDocumento` é único na contratação, não global. Título, nome de arquivo e URL **não** são identidade (a URL variou entre aliases).
+* `url` é a URL oficial do arquivo. A URL técnica do catálogo é o endpoint de metadados. A página navegável da contratação continua outro conceito. `Process.official_url` permanece `None`.
+* Zero documentos = consulta `200` + lista vazia (sucesso). Compra inexistente = HTTP 404 (falha). Não confundir os dois. Lista vazia não foi observada na amostra de 10 contratações; o cliente trata `[]` como sucesso porque o contrato observado é uma lista.
+* Catálogo e coleta são operações separadas: `CatalogProcessDocuments.catalog(query)` não roda automaticamente após a triagem. A regra futura esperada (CANDIDATE/PENDING consultam; DISCARDED normalmente não) **não** está automatizada neste commit.
+* `CollectionRound.metrics.documents_found` continua sem integração. A métrica deste passo vive em `DocumentCatalogResult.documents_found` (documentos mapeados daquela consulta). O significado da métrica da rodada (únicos, observados ou processos com documento) ainda não foi definido.
+* Persistência: `process_documents` (visão corrente, `UNIQUE(source, official_document_id)`, `last_seen_at`); `document_catalog_queries` (uma consulta); `document_observations` (snapshot append-only por consulta, `UNIQUE(query_id, document_id)`). Mesma consulta não duplica. Nova consulta registra nova observação. Sem download automático e sem análise de conteúdo.
+* Sem campo de versão oficial no payload. Mudança de metadados observáveis fica no snapshot da observação; não se afirma que o arquivo mudou.

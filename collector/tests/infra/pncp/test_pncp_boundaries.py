@@ -8,7 +8,7 @@ from pathlib import Path
 PNCP_ROOT = (
     Path(__file__).resolve().parents[3] / "src" / "collector" / "infra" / "pncp"
 )
-HTTP_MODULES = {"client.py", "errors.py", "models.py"}
+HTTP_MODULES = {"client.py", "document_client.py", "errors.py", "models.py"}
 
 
 def _imported_modules(path: Path) -> list[str]:
@@ -25,7 +25,7 @@ def _imported_modules(path: Path) -> list[str]:
 def test_pncp_non_mapper_modules_do_not_import_domain() -> None:
     violations: list[str] = []
     for path in sorted(PNCP_ROOT.rglob("*.py")):
-        if path.name in {"mapper.py", "publication_mapper.py"}:
+        if path.name in {"mapper.py", "publication_mapper.py", "document_mapper.py"}:
             continue
         for module in _imported_modules(path):
             if module.startswith("collector.domain"):

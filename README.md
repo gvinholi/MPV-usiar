@@ -57,7 +57,13 @@ docker compose down
 
 `DATABASE_URL` é a única variável de conexão. A aplicação lê essa variável num único ponto de infra.
 
-Coleta, persistência e triagem são passos separados: `collect()` não grava no banco; `ScreeningEngine.evaluate()` não executa SQL.
+Coleta, persistência, triagem e catálogo de documentos são passos separados. `CatalogProcessDocuments.catalog()` consulta metadados de uma contratação já conhecida; não baixa arquivos automaticamente.
+
+## Catálogo de documentos PNCP
+
+Endpoint observado (não inventado): `GET https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos`. A API de consulta (`/api/consulta`) responde 404 neste path.
+
+A identidade documental é `PNCP` + `{cnpj}/{ano}/{sequencial}/{sequencialDocumento}`. Título e URL não são identidade. Zero documentos (`200` + `[]`) é sucesso; HTTP 404 de compra inexistente é falha. `Process.official_url` continua sem receber URL técnica de API. `documents_found` da rodada de coleta não é atualizado por este passo.
 
 ## Camadas do coletor
 

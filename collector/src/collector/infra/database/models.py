@@ -242,3 +242,80 @@ class ScreeningEvidenceRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     evaluation: Mapped[ScreeningEvaluationRow] = relationship(back_populates="evidence")
+
+
+class ProcessDocumentRow(Base):
+    __tablename__ = "process_documents"
+    __table_args__ = (
+        UniqueConstraint(
+            "source",
+            "official_document_id",
+            name="uq_process_documents_source_official",
+        ),
+        CheckConstraint("source IN ('PNCP', 'RHS')", name="source"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    process_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("processes.id"), nullable=False, index=True
+    )
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    official_document_id: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(Text)
+    document_type: Mapped[str | None] = mapped_column(Text)
+    document_type_id: Mapped[int | None] = mapped_column(Integer)
+    document_type_description: Mapped[str | None] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(Text)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_active: Mapped[bool | None] = mapped_column(Boolean)
+    document_sequence: Mapped[int | None] = mapped_column(Integer)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DocumentCatalogQueryRow(Base):
+    __tablename__ = "document_catalog_queries"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    process_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("processes.id"), nullable=False, index=True
+    )
+    round_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("collection_rounds.id"), index=True
+    )
+    documents_found: Mapped[int] = mapped_column(Integer, nullable=False)
+    complete: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    queried_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DocumentObservationRow(Base):
+    __tablename__ = "document_observations"
+    __table_args__ = (
+        UniqueConstraint(
+            "query_id",
+            "document_id",
+            name="uq_document_observations_query_document",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    query_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("document_catalog_queries.id"), nullable=False, index=True
+    )
+    document_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("process_documents.id"), nullable=False, index=True
+    )
+    process_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("processes.id"), nullable=False, index=True
+    )
+    title: Mapped[str | None] = mapped_column(Text)
+    document_type: Mapped[str | None] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(Text)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_active: Mapped[bool | None] = mapped_column(Boolean)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
