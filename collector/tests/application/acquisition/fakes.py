@@ -105,6 +105,10 @@ class MemoryStorage:
     def exists(self, sha256: str) -> bool:
         return sha256 in self.blobs
 
+    def open(self, storage_key: str):
+        digest = storage_key.rsplit("/", 1)[-1]
+        return io.BytesIO(self.blobs[digest])
+
     def delete_if_created(self, storage_key: str) -> None:
         digest = storage_key.rsplit("/", 1)[-1]
         self.blobs.pop(digest, None)

@@ -380,3 +380,85 @@ class ArtifactArchiveEntryRow(Base):
     has_unsafe_path: Mapped[bool] = mapped_column(Boolean, nullable=False)
     unsafe_path_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ArtifactTextSourceRow(Base):
+    __tablename__ = "artifact_text_sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "artifact_id",
+            "source_path",
+            "sha256",
+            name="uq_artifact_text_sources_artifact_path_sha",
+        ),
+        CheckConstraint(
+            "detected_type IN ('PDF', 'ZIP', 'UNKNOWN')",
+            name="detected_type",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    artifact_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("artifacts.id"), nullable=False, index=True
+    )
+    archive_entry_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("artifact_archive_entries.id")
+    )
+    source_path: Mapped[str] = mapped_column(Text, nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    detected_type: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class TextExtractionRow(Base):
+    __tablename__ = "text_extractions"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_id",
+            "extractor_name",
+            "extractor_version",
+            name="uq_text_extractions_source_extractor_version",
+        ),
+        CheckConstraint(
+            "status IN ('DIGITAL_TEXT', 'EMPTY_TEXT', 'LIKELY_SCANNED', 'FAILED', 'UNSUPPORTED')",
+            name="status",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    source_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("artifact_text_sources.id"), nullable=False, index=True
+    )
+    extractor_name: Mapped[str] = mapped_column(Text, nullable=False)
+    extractor_version: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    page_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    pages_with_text: Mapped[int] = mapped_column(Integer, nullable=False)
+    character_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    likely_scanned: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(Text)
+    error_text: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class TextExtractionPageRow(Base):
+    __tablename__ = "text_extraction_pages"
+    __table_args__ = (
+        UniqueConstraint(
+            "extraction_id",
+            "page_number",
+            name="uq_text_extraction_pages_extraction_page",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    extraction_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("text_extractions.id"), nullable=False, index=True
+    )
+    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    char_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

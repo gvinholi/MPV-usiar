@@ -678,4 +678,20 @@ Decisões de `collector.application.acquisition` e `collector.infra.acquisition`
 * Tipo por magic bytes: `PDF` (`%PDF-`), `ZIP` (`PK…`), senão `UNKNOWN`. UNKNOWN válido não é rejeitado. Content-Type e extensão não decidem o tipo.
 * ZIP é inspecionado **sem extração**. Manifesto em `artifact_archive_entries`. Flags: path traversal, absoluto, symlink, criptografado, limites (500 entries, 100 MiB/entry, 250 MiB total descompactado, razão 100:1) via metadados ZIP, não extração.
 * Filesystem e PostgreSQL não compartilham transação. Download vai para temp controlado; commit atômico; se o DB falhar depois de um blob **novo**, o órfão content-addressed pode ser reutilizado. Blob já compartilhado não é apagado.
-* Sem extração textual, OCR, IA ou Cloud Storage neste commit.
+* Sem extração textual, OCR, IA ou Cloud Storage neste commit. A extração textual está na seção 32.
+
+---
+
+## 32. Extração textual determinística
+
+Decisões de `collector.application.extraction` e `collector.infra.extraction`. Não substituem as seções anteriores.
+
+* Cadeia: `process_document` → `document_artifact` → `artifact` → `artifact_text_sources` → `text_extractions` → `text_extraction_pages`. A triagem USIAR **não** é alterada.
+* Biblioteca: `pypdf` (faixa `>=5.4,<7`), local, somente leitura. Sem OCR, Tesseract, JS, anexos ou serviço externo. Limitações: PDFs escaneados/sem camada de texto ficam `LIKELY_SCANNED`; layouts complexos podem perder ordem.
+* PDF direto: o blob do artifact. PDF em ZIP: só se a reinspeção for `safe=True`; member materializado um a um, sem `extractall()`. Formato escolhido por magic bytes, não por extensão.
+* Integridade: SHA-256 do storage é recalculado antes de extrair. Divergência → `ARTIFACT_INTEGRITY_MISMATCH`.
+* Source member: path `artifact:{sha256}` (PDF direto) ou path do entry (ZIP) + `member_sha256`. Não é identidade oficial PNCP.
+* Texto persistido **por página** (número humano a partir de 1), quase cru: só remove NUL e normaliza `\r\n`. Sem FTS, resumo ou correção.
+* Heurística conservadora: há páginas e nenhuma tem texto após strip → `LIKELY_SCANNED`. Alguma página com texto → `DIGITAL_TEXT`. Extração sem páginas → `EMPTY_TEXT`.
+* Policy: 50 PDFs/artifact, 100 MiB/member, 1000 páginas/PDF, 5 milhões de caracteres/PDF.
+* Idempotência: `UNIQUE(source_id, extractor_name, extractor_version)`. Nova versão do extractor coexiste. Falha de um PDF no ZIP não apaga os outros.

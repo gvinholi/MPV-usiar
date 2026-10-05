@@ -16,12 +16,14 @@ from collector.domain.metrics import RoundMetrics
 from collector.domain.process import Process
 from collector.domain.screening import ScreeningStatus
 from collector.domain.source import Source, SourceIdentity
+from collector.domain.text import ExtractionStatus, TextPage, TextSource
 
 __all__ = [
     "HASH_ALGORITHM_SHA256",
     "ArchiveEntry",
     "Artifact",
     "CollectionRound",
+    "ExtractionStatus",
     "FileType",
     "Process",
     "ProcurementDocument",
@@ -31,4 +33,6 @@ __all__ = [
     "Source",
     "SourceDocumentIdentity",
     "SourceIdentity",
+    "TextPage",
+    "TextSource",
 ]

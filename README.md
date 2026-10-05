@@ -67,7 +67,11 @@ A identidade documental é `PNCP` + `{cnpj}/{ano}/{sequencial}/{sequencialDocume
 
 ## Aquisição de artefatos
 
-SHA-256 é identidade técnica do conteúdo observado, não versão oficial. O armazenamento local (`ARTIFACT_STORAGE_PATH`, default `var/artifacts`) é content-addressed e não entra no Git. Limite padrão: `DOCUMENT_MAX_DOWNLOAD_BYTES=52428800` (50 MiB). Destinos privados e esquemas não HTTP(S) são bloqueados. ZIP é inspecionado sem extrair membros. Sem análise de texto.
+SHA-256 é identidade técnica do conteúdo observado, não versão oficial. O armazenamento local (`ARTIFACT_STORAGE_PATH`, default `var/artifacts`) é content-addressed e não entra no Git. Limite padrão: `DOCUMENT_MAX_DOWNLOAD_BYTES=52428800` (50 MiB). Destinos privados e esquemas não HTTP(S) são bloqueados. ZIP é inspecionado sem extrair membros.
+
+## Extração textual
+
+`ExtractArtifactText.extract(artifact)` lê PDFs (diretos ou members de ZIP seguro) com `pypdf`, página a página. Sem OCR e sem mudança da triagem USIAR. PDF escaneado/sem texto vira `LIKELY_SCANNED`.
 
 ## Camadas do coletor
 

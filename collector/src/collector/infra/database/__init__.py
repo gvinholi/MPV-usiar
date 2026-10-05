@@ -8,6 +8,7 @@ from collector.infra.database.acquisition_store import (
 from collector.infra.database.document_store import SqlAlchemyDocumentCatalogRepository
 from collector.infra.database.screening_store import SqlAlchemyScreeningRepository
 from collector.infra.database.store import SqlAlchemyCollectionRepository
+from collector.infra.database.text_store import SqlAlchemyTextExtractionRepository
 
 __all__ = [
     "PersistenceConfigError",
@@ -15,6 +16,7 @@ __all__ = [
     "SqlAlchemyDocumentAcquisitionRepository",
     "SqlAlchemyDocumentCatalogRepository",
     "SqlAlchemyScreeningRepository",
+    "SqlAlchemyTextExtractionRepository",
     "create_engine_from_url",
     "create_session_factory",
     "database_url",
