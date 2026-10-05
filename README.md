@@ -73,9 +73,17 @@ SHA-256 é identidade técnica do conteúdo observado, não versão oficial. O a
 
 `ExtractArtifactText.extract(artifact)` lê PDFs (diretos ou members de ZIP seguro) com `pypdf`, página a página. Sem OCR. PDF escaneado/sem texto vira `LIKELY_SCANNED`.
 
-## Triagem em duas camadas
+## Triagem em três camadas
 
-A triagem inicial lê só a `description` do snapshot PNCP (`ScreeningEngine`). A triagem documental lê o texto extraído, página a página (`DocumentScreeningEngine`), reutilizando o mesmo perfil USIAR. As duas avaliações são independentes; nenhuma sobrescreve a outra e ainda **não** existe estado comercial final combinado. Filename não decide. Ausência de termo no texto extraído não vira descarte definitivo.
+```text
+PNCP description → Initial Screening
+                                 \
+                                  → Operational Resolver → fila CANDIDATE/PENDING/DISCARDED
+                                 /
+documents → artifact → text → Document Screening
+```
+
+A triagem inicial lê a `description` PNCP. A documental lê o texto extraído. A resolução operacional decide o estado de trabalho **sem sobrescrever** as duas primeiras. Documento decisivo com cobertura completa pode recuperar um `DISCARDED` inicial ou confirmar um descarte. Ausência de evidência documental **não** descarta. Sem documento, o operacional replica a inicial. Ainda **não** há `SELECTED`/`CONFIRMED` nem decisão humana.
 
 ## Camadas do coletor
 

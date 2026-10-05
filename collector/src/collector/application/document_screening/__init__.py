@@ -1,6 +1,7 @@
 """Triagem documental determinística. Independente da triagem inicial."""
 
 from collector.application.document_screening.compare import (
+    DivergenceKind,
     ScreeningComparison,
     compare_screenings,
 )
@@ -29,6 +30,7 @@ from collector.application.document_screening.results import (
 
 __all__ = [
     "DOCUMENT_ENGINE_VERSION",
+    "DivergenceKind",
     "DocumentCoverage",
     "DocumentPageRef",
     "DocumentReasonCode",

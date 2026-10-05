@@ -721,5 +721,26 @@ Decisões de `collector.application.document_screening`. Não substituem as seç
 * Estados automáticos: `CANDIDATE`, `PENDING`, `DISCARDED`. Sem `SELECTED`, `CONFIRMED`, IA, OCR, FTS ou `confidence` numérico.
 * Precedência: HVAC+manutenção/higienização próximos sem misto → `CANDIDATE`; o mesmo com instalação ou compra/peças (não negados, próximos do HVAC) → `PENDING` misto; só exclusão isolada próxima do HVAC e cobertura completa → `DISCARDED`; HVAC sem serviço próximo → `PENDING / DOCUMENT_AMBIGUOUS_RELEVANT_CONTEXT`; nenhum HVAC → `PENDING / DOCUMENT_NO_DECISIVE_EVIDENCE` (ausência de termo no texto extraído não prova irrelevância). `LIKELY_SCANNED`, falha ou formato não suportado tornam `complete=False` e bloqueiam descarte isolado.
 * Fingerprint: SHA-256 UTF-8 de `profile.code/profile.version`, `engine_version` e member SHA-256 ordenados. Sem UUID de row, timestamp ou `acquisition_id`. Mesmo conjunto + perfil + engine → idempotente (`UNIQUE(process_id, profile_id, engine_version, document_set_fingerprint)`). Member/perfil/engine novos → nova avaliação. Histórico antigo permanece.
-* Comparação `compare_screenings(initial, document)` expõe estados e `diverged`. Não cria estado final combinado. Métricas em `DocumentScreeningSummary`; não entram em `CollectionRound.metrics`.
+* Comparação `compare_screenings(initial, document)` expõe `state_diverged`, `reason_diverged` e `divergence_kind` (`NONE`, `STATE_ONLY`, `REASON_ONLY`, `STATE_AND_REASON`). Reason codes de namespaces diferentes: strings distintas contam como `reason_diverged`. A resolução operacional está na seção 34.
 * Avaliação carrega um processo (ou um artefato) por vez. Sem regex catastrófica.
+
+---
+
+## 34. Resolução operacional
+
+Decisões de `collector.application.resolution`. Não substituem as seções anteriores. **Ainda não há decisão humana nem `SELECTED`/`CONFIRMED`.**
+
+```text
+PNCP description → Initial Screening
+                                 \
+                                  → Operational Resolver → fila operacional atual
+                                 /
+documents → artifact → text → Document Screening
+```
+
+* Três camadas independentes. Nenhuma sobrescreve a outra. `processes` **não** ganha `current_state` mutável. O estado atual é a resolução mais recente (`resolved_at DESC`, `created_at DESC`, `resolution_fingerprint DESC`).
+* `OperationalResolver.resolve(initial, document | None)` é puro. Sem SQL, HTTP ou filesystem. Sem peso/confidence. Sem initial → `INITIAL_SCREENING_REQUIRED`. Processos ou perfis distintos → erro explícito. Document sozinho não resolve.
+* Força documental: `POSITIVE_DECISIVE` (`DOCUMENT_RELEVANT_*`), `MIXED_DECISIVE` (`DOCUMENT_MIXED_*`), `NEGATIVE_DECISIVE` (`DOCUMENT_ISOLATED_*`), `NON_DECISIVE` (ambíguo, sem evidência, sem texto, cobertura incompleta).
+* Matriz: sem documento → replica initial (`INITIAL_SCREENING_ONLY`); positivo → `CANDIDATE` mesmo com cobertura incompleta; misto → `PENDING`; negativo completo com evidência de exclusão → `DISCARDED`; negativo incompleto ou não decisivo → `PENDING` (nunca descarte). Documento não decisivo **não** mantém `DISCARDED` inicial.
+* Fingerprint: SHA-256 de `profile.code/version`, versão do resolver, `initial:{hash do sinal inicial}` e `document:{document_set_fingerprint|NONE}`. Identidade inicial lógica = perfil + engine + campo + estado + reason + evidências ordenadas — **não** `evaluation.id`. O FK histórico usa o UUID da row.
+* Persistência append-only: `operational_resolutions` com `UNIQUE(process_id, profile_id, resolver_engine_version, resolution_fingerprint)`. Fila: `list_current_resolutions(state=...)`. Métricas próprias (`recovered_from_initial_discard`, `candidate_downgraded_to_discarded`); não entram em `CollectionRound.metrics`.

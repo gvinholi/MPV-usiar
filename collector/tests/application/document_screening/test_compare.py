@@ -26,6 +26,8 @@ def test_divergence_pending_to_candidate() -> None:
     assert comparison.initial_state is ScreeningStatus.PENDING
     assert comparison.document_state is ScreeningStatus.CANDIDATE
     assert comparison.diverged is True
+    assert comparison.state_diverged is True
+    assert comparison.reason_diverged is True
     assert comparison.document_reason is DocumentReasonCode.DOCUMENT_RELEVANT_MAINTENANCE
 
 
@@ -38,3 +40,5 @@ def test_same_state_is_not_divergence() -> None:
     assert comparison.initial_state is ScreeningStatus.CANDIDATE
     assert comparison.document_state is ScreeningStatus.CANDIDATE
     assert comparison.diverged is False
+    assert comparison.state_diverged is False
+    assert comparison.reason_diverged is True

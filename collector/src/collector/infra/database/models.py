@@ -553,3 +553,55 @@ class DocumentScreeningEvidenceRow(Base):
     evaluation: Mapped[DocumentScreeningEvaluationRow] = relationship(
         back_populates="evidence"
     )
+
+
+class OperationalResolutionRow(Base):
+    __tablename__ = "operational_resolutions"
+    __table_args__ = (
+        UniqueConstraint(
+            "process_id",
+            "profile_id",
+            "resolver_engine_version",
+            "resolution_fingerprint",
+            name="uq_operational_res_process_profile_engine_fp",
+        ),
+        CheckConstraint(
+            "state IN ('CANDIDATE', 'PENDING', 'DISCARDED')",
+            name="state",
+        ),
+        CheckConstraint(
+            "initial_state IN ('CANDIDATE', 'PENDING', 'DISCARDED')",
+            name="initial_state",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    process_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("processes.id"), nullable=False, index=True
+    )
+    profile_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("screening_profiles.id"), nullable=False, index=True
+    )
+    initial_evaluation_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("screening_evaluations.id"), nullable=False, index=True
+    )
+    document_evaluation_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("document_screening_evaluations.id"), index=True
+    )
+    resolver_engine_version: Mapped[str] = mapped_column(Text, nullable=False)
+    resolution_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_code: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_text: Mapped[str] = mapped_column(Text, nullable=False)
+    rule_code: Mapped[str] = mapped_column(Text, nullable=False)
+    coverage_complete: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    state_diverged: Mapped[bool | None] = mapped_column(Boolean)
+    reason_diverged: Mapped[bool | None] = mapped_column(Boolean)
+    initial_state: Mapped[str] = mapped_column(Text, nullable=False)
+    document_state: Mapped[str | None] = mapped_column(Text)
+    resolved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    process: Mapped[ProcessRow] = relationship()
+    profile: Mapped[ScreeningProfileRow] = relationship()
+

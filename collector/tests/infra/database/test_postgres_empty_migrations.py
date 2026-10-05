@@ -48,7 +48,8 @@ def test_alembic_upgrade_from_empty_database(postgres_url: str) -> None:
         assert "text_extraction_pages" in tables
         assert "document_screening_evaluations" in tables
         assert "document_screening_evidence" in tables
-        assert versions == ["0006_document_screening"]
+        assert "operational_resolutions" in tables
+        assert versions == ["0007_operational"]
     finally:
         with admin.connect() as connection:
             connection.execute(text(f"DROP DATABASE IF EXISTS {EMPTY_DB}"))
