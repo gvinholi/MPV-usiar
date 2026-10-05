@@ -686,7 +686,7 @@ Decisões de `collector.application.acquisition` e `collector.infra.acquisition`
 
 Decisões de `collector.application.extraction` e `collector.infra.extraction`. Não substituem as seções anteriores.
 
-* Cadeia: `process_document` → `document_artifact` → `artifact` → `artifact_text_sources` → `text_extractions` → `text_extraction_pages`. A triagem USIAR **não** é alterada.
+* Cadeia: `process_document` → `document_artifact` → `artifact` → `artifact_text_sources` → `text_extractions` → `text_extraction_pages`. A triagem inicial (descrição PNCP) **não** é alterada. A triagem documental é a seção 33.
 * Biblioteca: `pypdf` (faixa `>=5.4,<7`), local, somente leitura. Sem OCR, Tesseract, JS, anexos ou serviço externo. Limitações: PDFs escaneados/sem camada de texto ficam `LIKELY_SCANNED`; layouts complexos podem perder ordem.
 * PDF direto: o blob do artifact. PDF em ZIP: só se a reinspeção for `safe=True`; member materializado um a um, sem `extractall()`. Formato escolhido por magic bytes, não por extensão.
 * Integridade: SHA-256 do storage é recalculado antes de extrair. Divergência → `ARTIFACT_INTEGRITY_MISMATCH`.
@@ -695,3 +695,31 @@ Decisões de `collector.application.extraction` e `collector.infra.extraction`. 
 * Heurística conservadora: há páginas e nenhuma tem texto após strip → `LIKELY_SCANNED`. Alguma página com texto → `DIGITAL_TEXT`. Extração sem páginas → `EMPTY_TEXT`.
 * Policy: 50 PDFs/artifact, 100 MiB/member, 1000 páginas/PDF, 5 milhões de caracteres/PDF.
 * Idempotência: `UNIQUE(source_id, extractor_name, extractor_version)`. Nova versão do extractor coexiste. Falha de um PDF no ZIP não apaga os outros.
+
+---
+
+## 33. Triagem documental determinística
+
+Decisões de `collector.application.document_screening`. Não substituem as seções anteriores. **Ainda não existe decisão comercial final.**
+
+* Duas avaliações independentes:
+
+  ```text
+  description PNCP  →  initial screening   (screening_evaluations)
+  documents         →  artifact → text → document screening
+                       (document_screening_evaluations)
+  ```
+
+  A triagem inicial do Commit 09 permanece histórica. Nunca se transforma `PENDING` em `CANDIDATE` atualizando a linha antiga.
+* O motor documental reutiliza o mesmo `ScreeningProfile` (USIAR versionado). Termos de negócio não são duplicados nem hard-coded no motor. Cues de negação são linguísticos e ficam na `DocumentScreeningPolicy`.
+* Unidade de análise: **página**. Não se concatena o edital inteiro. Evidência aponta documento/artefato/source/member, `extraction_page_id`, `page_number`, termo, categoria e snippet original.
+* Casamento: mesma normalização da triagem inicial (caixa, acento, hífen, pontuação) via `tokenize_with_spans`. O match ocorre na forma normalizada; `matched_text` e snippet vêm do texto original, com offsets no original.
+* Snippet: raio de 120 caracteres, teto de 300, reticências se truncado. Não guarda a página inteira. Não corta caractere combinante.
+* Proximidade (determinística, sem NLP): HVAC e serviço/instalação/compra/peças só se combinam na **mesma página extraída** e com distância de tokens ≤ 80 (`proximity_token_window`). Páginas diferentes nunca se combinam. Mesma página muito distante não se combina automaticamente.
+* Negação simples: se um cue configurado (`nao`, `sem`, `nao inclui`, `nao havera`, …) é sufixo da janela de até 6 tokens imediatamente antes do termo, o match é gravado com `negated=True` e não entra na decisão. Frases complexas não são interpretadas.
+* Filename não decide. Só texto encontrado.
+* Estados automáticos: `CANDIDATE`, `PENDING`, `DISCARDED`. Sem `SELECTED`, `CONFIRMED`, IA, OCR, FTS ou `confidence` numérico.
+* Precedência: HVAC+manutenção/higienização próximos sem misto → `CANDIDATE`; o mesmo com instalação ou compra/peças (não negados, próximos do HVAC) → `PENDING` misto; só exclusão isolada próxima do HVAC e cobertura completa → `DISCARDED`; HVAC sem serviço próximo → `PENDING / DOCUMENT_AMBIGUOUS_RELEVANT_CONTEXT`; nenhum HVAC → `PENDING / DOCUMENT_NO_DECISIVE_EVIDENCE` (ausência de termo no texto extraído não prova irrelevância). `LIKELY_SCANNED`, falha ou formato não suportado tornam `complete=False` e bloqueiam descarte isolado.
+* Fingerprint: SHA-256 UTF-8 de `profile.code/profile.version`, `engine_version` e member SHA-256 ordenados. Sem UUID de row, timestamp ou `acquisition_id`. Mesmo conjunto + perfil + engine → idempotente (`UNIQUE(process_id, profile_id, engine_version, document_set_fingerprint)`). Member/perfil/engine novos → nova avaliação. Histórico antigo permanece.
+* Comparação `compare_screenings(initial, document)` expõe estados e `diverged`. Não cria estado final combinado. Métricas em `DocumentScreeningSummary`; não entram em `CollectionRound.metrics`.
+* Avaliação carrega um processo (ou um artefato) por vez. Sem regex catastrófica.

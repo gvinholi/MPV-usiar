@@ -184,6 +184,9 @@ class ScreeningProfileRow(Base):
     evaluations: Mapped[list[ScreeningEvaluationRow]] = relationship(
         back_populates="profile"
     )
+    document_evaluations: Mapped[list[DocumentScreeningEvaluationRow]] = relationship(
+        back_populates="profile"
+    )
 
 
 class ScreeningEvaluationRow(Base):
@@ -462,3 +465,91 @@ class TextExtractionPageRow(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     char_count: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DocumentScreeningEvaluationRow(Base):
+    __tablename__ = "document_screening_evaluations"
+    __table_args__ = (
+        UniqueConstraint(
+            "process_id",
+            "profile_id",
+            "engine_version",
+            "document_set_fingerprint",
+            name="uq_doc_screening_eval_process_profile_engine_fp",
+        ),
+        CheckConstraint(
+            "state IN ('CANDIDATE', 'PENDING', 'DISCARDED')",
+            name="state",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    process_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("processes.id"), nullable=False, index=True
+    )
+    profile_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("screening_profiles.id"), nullable=False, index=True
+    )
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_code: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_text: Mapped[str] = mapped_column(Text, nullable=False)
+    engine_version: Mapped[str] = mapped_column(Text, nullable=False)
+    document_set_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    documents_considered: Mapped[int] = mapped_column(Integer, nullable=False)
+    sources_considered: Mapped[int] = mapped_column(Integer, nullable=False)
+    pages_considered: Mapped[int] = mapped_column(Integer, nullable=False)
+    pages_with_text: Mapped[int] = mapped_column(Integer, nullable=False)
+    likely_scanned_sources: Mapped[int] = mapped_column(Integer, nullable=False)
+    failed_sources: Mapped[int] = mapped_column(Integer, nullable=False)
+    unsupported_sources: Mapped[int] = mapped_column(Integer, nullable=False)
+    complete: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    process: Mapped[ProcessRow] = relationship()
+    profile: Mapped[ScreeningProfileRow] = relationship(
+        back_populates="document_evaluations"
+    )
+    evidence: Mapped[list[DocumentScreeningEvidenceRow]] = relationship(
+        back_populates="evaluation"
+    )
+
+
+class DocumentScreeningEvidenceRow(Base):
+    __tablename__ = "document_screening_evidence"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    evaluation_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("document_screening_evaluations.id"),
+        nullable=False,
+        index=True,
+    )
+    extraction_page_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("text_extraction_pages.id"), nullable=False, index=True
+    )
+    document_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("process_documents.id")
+    )
+    source_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("artifact_text_sources.id"), nullable=False
+    )
+    artifact_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("artifacts.id"), nullable=False
+    )
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    configured_term: Mapped[str] = mapped_column(Text, nullable=False)
+    matched_text: Mapped[str] = mapped_column(Text, nullable=False)
+    context_snippet: Mapped[str] = mapped_column(Text, nullable=False)
+    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    source_path: Mapped[str] = mapped_column(Text, nullable=False)
+    artifact_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    negated: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    start_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    evaluation: Mapped[DocumentScreeningEvaluationRow] = relationship(
+        back_populates="evidence"
+    )

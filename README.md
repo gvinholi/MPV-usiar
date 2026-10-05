@@ -71,7 +71,11 @@ SHA-256 é identidade técnica do conteúdo observado, não versão oficial. O a
 
 ## Extração textual
 
-`ExtractArtifactText.extract(artifact)` lê PDFs (diretos ou members de ZIP seguro) com `pypdf`, página a página. Sem OCR e sem mudança da triagem USIAR. PDF escaneado/sem texto vira `LIKELY_SCANNED`.
+`ExtractArtifactText.extract(artifact)` lê PDFs (diretos ou members de ZIP seguro) com `pypdf`, página a página. Sem OCR. PDF escaneado/sem texto vira `LIKELY_SCANNED`.
+
+## Triagem em duas camadas
+
+A triagem inicial lê só a `description` do snapshot PNCP (`ScreeningEngine`). A triagem documental lê o texto extraído, página a página (`DocumentScreeningEngine`), reutilizando o mesmo perfil USIAR. As duas avaliações são independentes; nenhuma sobrescreve a outra e ainda **não** existe estado comercial final combinado. Filename não decide. Ausência de termo no texto extraído não vira descarte definitivo.
 
 ## Camadas do coletor
 

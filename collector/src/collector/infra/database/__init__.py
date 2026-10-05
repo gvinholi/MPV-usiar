@@ -6,6 +6,9 @@ from collector.infra.database.acquisition_store import (
     SqlAlchemyDocumentAcquisitionRepository,
 )
 from collector.infra.database.document_store import SqlAlchemyDocumentCatalogRepository
+from collector.infra.database.document_screening_store import (
+    SqlAlchemyDocumentScreeningRepository,
+)
 from collector.infra.database.screening_store import SqlAlchemyScreeningRepository
 from collector.infra.database.store import SqlAlchemyCollectionRepository
 from collector.infra.database.text_store import SqlAlchemyTextExtractionRepository
@@ -15,6 +18,7 @@ __all__ = [
     "SqlAlchemyCollectionRepository",
     "SqlAlchemyDocumentAcquisitionRepository",
     "SqlAlchemyDocumentCatalogRepository",
+    "SqlAlchemyDocumentScreeningRepository",
     "SqlAlchemyScreeningRepository",
     "SqlAlchemyTextExtractionRepository",
     "create_engine_from_url",
