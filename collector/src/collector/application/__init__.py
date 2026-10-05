@@ -4,6 +4,23 @@ Pode depender de `collector.domain`. Não deve depender de adaptadores
 concretos em `collector.infra`.
 """
 
+from collector.application.acquisition import (
+    DEFAULT_MAX_DOWNLOAD_BYTES,
+    AcquireDocumentArtifact,
+    AcquisitionError,
+    AcquisitionIssue,
+    AcquisitionReason,
+    ArchiveSummary,
+    ArtifactStorage,
+    BinaryDownloader,
+    DocumentAcquisitionPolicy,
+    DocumentAcquisitionRepository,
+    DocumentAcquisitionResult,
+    PersistAcquisitionOutcome,
+    PersistDocumentAcquisition,
+    detect_file_type,
+    inspect_zip,
+)
 from collector.application.collection import (
     CollectionIssue,
     CollectionOrchestrator,
@@ -73,6 +90,19 @@ from collector.application.publications import (
 )
 
 __all__ = [
+    "DEFAULT_MAX_DOWNLOAD_BYTES",
+    "AcquireDocumentArtifact",
+    "AcquisitionError",
+    "AcquisitionIssue",
+    "AcquisitionReason",
+    "ArchiveSummary",
+    "ArtifactStorage",
+    "BinaryDownloader",
+    "DocumentAcquisitionPolicy",
+    "DocumentAcquisitionRepository",
+    "DocumentAcquisitionResult",
+    "PersistAcquisitionOutcome",
+    "PersistDocumentAcquisition",
     "CollectionIssue",
     "CollectionOrchestrator",
     "CollectionRequest",
@@ -127,6 +157,8 @@ __all__ = [
     "PublicationQuery",
     "RetryPolicy",
     "TransientFetchError",
+    "detect_file_type",
+    "inspect_zip",
     "resolve_identities",
     "summarize",
     "usiar_v1",

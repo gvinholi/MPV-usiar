@@ -57,13 +57,17 @@ docker compose down
 
 `DATABASE_URL` é a única variável de conexão. A aplicação lê essa variável num único ponto de infra.
 
-Coleta, persistência, triagem e catálogo de documentos são passos separados. `CatalogProcessDocuments.catalog()` consulta metadados de uma contratação já conhecida; não baixa arquivos automaticamente.
+Coleta, persistência, triagem, catálogo e aquisição de artefatos são passos separados. `CatalogProcessDocuments.catalog()` consulta metadados; `AcquireDocumentArtifact.acquire(document)` baixa um documento já catalogado, sob demanda.
 
 ## Catálogo de documentos PNCP
 
 Endpoint observado (não inventado): `GET https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos`. A API de consulta (`/api/consulta`) responde 404 neste path.
 
 A identidade documental é `PNCP` + `{cnpj}/{ano}/{sequencial}/{sequencialDocumento}`. Título e URL não são identidade. Zero documentos (`200` + `[]`) é sucesso; HTTP 404 de compra inexistente é falha. `Process.official_url` continua sem receber URL técnica de API. `documents_found` da rodada de coleta não é atualizado por este passo.
+
+## Aquisição de artefatos
+
+SHA-256 é identidade técnica do conteúdo observado, não versão oficial. O armazenamento local (`ARTIFACT_STORAGE_PATH`, default `var/artifacts`) é content-addressed e não entra no Git. Limite padrão: `DOCUMENT_MAX_DOWNLOAD_BYTES=52428800` (50 MiB). Destinos privados e esquemas não HTTP(S) são bloqueados. ZIP é inspecionado sem extrair membros. Sem análise de texto.
 
 ## Camadas do coletor
 

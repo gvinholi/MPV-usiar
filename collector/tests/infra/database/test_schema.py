@@ -30,6 +30,9 @@ def test_expected_tables_exist(db_session: Session) -> None:
         "process_documents",
         "document_catalog_queries",
         "document_observations",
+        "artifacts",
+        "document_artifacts",
+        "artifact_archive_entries",
     }.issubset(names)
     assert "licitacoes" not in names
 
@@ -49,6 +52,7 @@ def test_unique_constraints_exist(db_session: Session) -> None:
     assert "uq_screening_evaluations_observation_profile_engine" in names
     assert "uq_process_documents_source_official" in names
     assert "uq_document_observations_query_document" in names
+    assert "uq_artifacts_sha256" in names
 
 
 def test_foreign_keys_exist(db_session: Session) -> None:

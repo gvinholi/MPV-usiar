@@ -21,6 +21,13 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# Artefatos baixados (nunca commitar PDF/ZIP/binários)
+var/artifacts/
+*.pdf
+*.zip
+*.docx
+*.xlsx
+
 # OS e editor
 .DS_Store
 Thumbs.db

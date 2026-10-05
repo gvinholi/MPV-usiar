@@ -334,7 +334,7 @@ Guardar:
 * versão quando disponível;
 * localização no armazenamento quando aplicável.
 
-O contrato observado da API de arquivos e a persistência do catálogo estão na seção 30. Neste commit não há download automático nem armazenamento de binários.
+O contrato observado da API de arquivos e a persistência do catálogo estão na seção 30. A aquisição de binários e o armazenamento local estão na seção 31.
 
 ---
 
@@ -662,3 +662,20 @@ Decisões de `collector.application.documents` e `collector.infra.pncp` (cliente
 * `CollectionRound.metrics.documents_found` continua sem integração. A métrica deste passo vive em `DocumentCatalogResult.documents_found` (documentos mapeados daquela consulta). O significado da métrica da rodada (únicos, observados ou processos com documento) ainda não foi definido.
 * Persistência: `process_documents` (visão corrente, `UNIQUE(source, official_document_id)`, `last_seen_at`); `document_catalog_queries` (uma consulta); `document_observations` (snapshot append-only por consulta, `UNIQUE(query_id, document_id)`). Mesma consulta não duplica. Nova consulta registra nova observação. Sem download automático e sem análise de conteúdo.
 * Sem campo de versão oficial no payload. Mudança de metadados observáveis fica no snapshot da observação; não se afirma que o arquivo mudou.
+
+---
+
+## 31. Aquisição segura de artefatos
+
+Decisões de `collector.application.acquisition` e `collector.infra.acquisition`. Não substituem as seções anteriores.
+
+* Documento PNCP (`process_documents`) ≠ artefato (`artifacts`). O artefato é o binário observado. SHA-256 é identidade **técnica local**, não versão oficial nem identificador PNCP.
+* A aquisição é explícita: `AcquireDocumentArtifact.acquire(document)`. Não há `collect() → baixar tudo` e a triagem USIAR não muda.
+* Download em streaming (httpx), com `DocumentAcquisitionPolicy` centralizada: 50 MiB por arquivo (os ZIPs observados no piloto tinham ~1,4–2,0 MiB), timeout 60s (a primeira tentativa com 30s falhou em conexão fria), no máximo 5 redirects. `Content-Length` é aviso; o limite real é pelos bytes recebidos.
+* URL é entrada externa. Só `http`/`https`. Destinos loopback, RFC1918, link-local, multicast, reservados e não globais são bloqueados **depois da resolução DNS**, inclusive em redirects. Há janela TOCTOU/DNS rebinding entre o check e o connect; isto não é firewall.
+* Storage abstraído (`ArtifactStorage`). Implementação local content-addressed: `var/artifacts/sha256/{ab}/{cd}/{sha256}`. Nome remoto é só metadado. Diretório em `.gitignore`.
+* `UNIQUE(artifacts.sha256)` deduplica o blob. `document_artifacts` é histórico append-only documento ↔ artefato. Dois documentos PNCP com o mesmo hash compartilham o blob e **não** são colapsados. Hash diferente no mesmo documento cria novo artefato (“conteúdo técnico observado diferente”).
+* Tipo por magic bytes: `PDF` (`%PDF-`), `ZIP` (`PK…`), senão `UNKNOWN`. UNKNOWN válido não é rejeitado. Content-Type e extensão não decidem o tipo.
+* ZIP é inspecionado **sem extração**. Manifesto em `artifact_archive_entries`. Flags: path traversal, absoluto, symlink, criptografado, limites (500 entries, 100 MiB/entry, 250 MiB total descompactado, razão 100:1) via metadados ZIP, não extração.
+* Filesystem e PostgreSQL não compartilham transação. Download vai para temp controlado; commit atômico; se o DB falhar depois de um blob **novo**, o órfão content-addressed pode ser reutilizado. Blob já compartilhado não é apagado.
+* Sem extração textual, OCR, IA ou Cloud Storage neste commit.

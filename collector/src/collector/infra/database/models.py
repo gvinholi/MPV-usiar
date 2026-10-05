@@ -319,3 +319,64 @@ class DocumentObservationRow(Base):
     is_active: Mapped[bool | None] = mapped_column(Boolean)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ArtifactRow(Base):
+    __tablename__ = "artifacts"
+    __table_args__ = (
+        UniqueConstraint("sha256", name="uq_artifacts_sha256"),
+        CheckConstraint("hash_algorithm = 'sha256'", name="hash_algorithm"),
+        CheckConstraint(
+            "detected_type IN ('PDF', 'ZIP', 'UNKNOWN')",
+            name="detected_type",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    hash_algorithm: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    detected_type: Mapped[str] = mapped_column(Text, nullable=False)
+    storage_key: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DocumentArtifactRow(Base):
+    __tablename__ = "document_artifacts"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    document_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("process_documents.id"), nullable=False, index=True
+    )
+    artifact_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("artifacts.id"), index=True
+    )
+    acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    requested_url: Mapped[str | None] = mapped_column(Text)
+    final_url: Mapped[str | None] = mapped_column(Text)
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    http_content_type: Mapped[str | None] = mapped_column(Text)
+    original_filename: Mapped[str | None] = mapped_column(Text)
+    complete: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(Text)
+    bytes_received: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ArtifactArchiveEntryRow(Base):
+    __tablename__ = "artifact_archive_entries"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    artifact_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("artifacts.id"), nullable=False, index=True
+    )
+    original_path: Mapped[str] = mapped_column(Text, nullable=False)
+    compressed_size: Mapped[int | None] = mapped_column(Integer)
+    uncompressed_size: Mapped[int | None] = mapped_column(Integer)
+    is_directory: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    extension: Mapped[str | None] = mapped_column(Text)
+    is_encrypted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    is_symlink: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    has_unsafe_path: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    unsafe_path_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

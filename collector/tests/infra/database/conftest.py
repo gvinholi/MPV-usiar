@@ -51,7 +51,7 @@ def db_session(migrated_engine: Engine) -> Iterator[Session]:
     with migrated_engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE collection_rounds, processes, screening_profiles "
+                "TRUNCATE collection_rounds, processes, screening_profiles, artifacts "
                 "RESTART IDENTITY CASCADE"
             )
         )
