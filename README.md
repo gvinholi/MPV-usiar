@@ -95,6 +95,31 @@ As consultas `review_status_for_process(process_id, profile_id)`, `latest_review
 
 Migration: `alembic upgrade head` aplica até `0008_human_reviews`, inclusive em banco vazio. Detalhes de concorrência, status e auditoria estão em [ARCHITECTURE.md](docs/ARCHITECTURE.md#35-revisão-humana-auditável).
 
+## Read model / dashboard queries
+
+`DashboardQueries` é a entrada de aplicação para summary, funil, oportunidades, detalhe, documentos, evidências, timeline, fila humana e rodadas. `SqlAlchemyReadModelStore` lê o mesmo PostgreSQL em transações `REPEATABLE READ / READ ONLY`; não coleta, adquire, extrai ou grava decisões. Sem migration, HTTP ou frontend.
+
+```python
+from datetime import UTC, datetime
+from collector.application.read_model import (
+    DashboardQueries, OpportunityFilters, Pagination, ProfileScope, TimeRange,
+)
+from collector.infra.database import SqlAlchemyReadModelStore
+
+queries = DashboardQueries(SqlAlchemyReadModelStore(session_factory))
+scope = ProfileScope(profile_id=profile.id)
+period = TimeRange(datetime(2026, 10, 1, tzinfo=UTC), datetime(2026, 10, 16, tzinfo=UTC))
+summary = queries.dashboard_summary(scope, period)
+page = queries.list_opportunities(
+    scope, OpportunityFilters(human_decision="SELECTED"), Pagination(page=1, page_size=25)
+)
+detail = queries.get_opportunity(process_id, scope)
+```
+
+O intervalo é `[from_datetime, to_datetime)`. `summary.current_snapshot` mostra o estado **atual dos processos cuja primeira persistência está no período**; `period_activity` conta os eventos ocorridos no período, cada qual pelo timestamp documentado. O funil combina estágios e não é necessariamente monotônico. Não é um snapshot retroativo no fim do intervalo.
+
+Perfil é explícito: id ou code; code com múltiplas versões exige id. Paginação server-side (25 por padrão, máximo 100), sort por allowlist e filtros SQL. SELECTED histórico/stale não aparece como seleção atual. DTOs preservam Decimal, timestamps com fuso e campos nulos. Documentos retornam metadados/snippets, sem conteúdo integral de PDFs, storage keys ou erros brutos de transporte. Semântica completa em [ARCHITECTURE.md](docs/ARCHITECTURE.md#36-read-model-e-consultas-do-dashboard).
+
 ## Camadas do coletor
 
 * `collector.domain` — conceitos e regras de negócio; sem I/O e sem fornecedor.

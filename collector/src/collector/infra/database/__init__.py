@@ -16,8 +16,10 @@ from collector.infra.database.screening_store import SqlAlchemyScreeningReposito
 from collector.infra.database.store import SqlAlchemyCollectionRepository
 from collector.infra.database.text_store import SqlAlchemyTextExtractionRepository
 from collector.infra.database.human_review_store import SqlAlchemyHumanReviewRepository
+from collector.infra.database.read_model_store import SqlAlchemyReadModelStore
 
 __all__ = [
+    "SqlAlchemyReadModelStore",
     "SqlAlchemyHumanReviewRepository",
     "PersistenceConfigError",
     "SqlAlchemyCollectionRepository",

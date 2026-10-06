@@ -795,3 +795,78 @@ Sem resolução, `review_status_for_process` retorna `None`. STALE tem decisão/
 `HumanReviewSummary` independente: current_resolutions, needs_review (exclui descarte automático), reviewed, stale_reviews (todos os estados operacionais), selected, human_discarded, human_pending, reviews_total e stale_overrides_total. Opcionais filtros por perfil. Current conta pares processo/perfil, histórico conta linhas. Summary usa snapshot REPEATABLE READ para manter seus dois SELECTs coerentes, sem locks de escrita. Não altera `CollectionRound.metrics`.
 
 Sem novas dependências de runtime. Fora do escopo: CONFIRMED, auth/RBAC/accounts, dashboard/API/Next.js, threads/anexos humanos, edição/exclusão, IA/LLM/OpenAI/OCR, e-mail/Telegram/GCP/RHS, proposta ou participação automática.
+
+## 36. Read model e consultas do dashboard
+
+```text
+Write Side → PostgreSQL → Read Model → Future HTTP API → Future Dashboard
+```
+
+Mesmo banco e schema dos commits anteriores. Sem event sourcing, CQRS distribuído, banco de leitura separado, materialized views ou cache. Nenhuma migration no Commit 16. As quatro camadas de decisão continuam independentes; SELECTED exclusivamente humano e CONFIRMED fora do escopo.
+
+**Contratos.** `application/read_model` define dataclasses imutáveis, filtros, paginação, erros, `ReadModelQueries` (Protocol) e fachada tipada `DashboardQueries`. `infra/database/read_model_store.py` implementa a porta; `read_model_sql.py` contém projeção comum/filtros SQL; `read_model_timeline.py` contém a união de eventos. Nenhum método da fachada chama serviços de escrita ou integrações. As consultas abrem transação PostgreSQL `REPEATABLE READ` e executam `SET TRANSACTION READ ONLY`. Até uma tentativa acidental de DML nessa transação é rejeitada pelo banco. Fechar a sessão encerra o snapshot sem commit de escrita.
+
+**Perfis.** Consultas com screening/resolution/review exigem `ProfileScope` com exatamente um `profile_id` ou `profile_code`. Code é aceito quando identifica uma única versão; se houver várias, `AmbiguousProfileError` exige id. Perfil inexistente gera `ProfileNotFoundError`. Não há USIAR hard-coded nem escolha implícita de versão ativa. Processo sem avaliação no perfil continua na lista, com campos de decisão nulos; dados de coleta/documentos não são atributos de perfil. Rodadas, documentos e cobertura de fonte não recebem perfil porque são globais.
+
+**Estado atual.** Uma oportunidade por processo no perfil solicitado. Latest operational: `resolved_at DESC, created_at DESC, resolution_fingerprint DESC`, igual ao Commit 14. Latest human sobre essa resolução: `decided_at DESC, created_at DESC, sequence DESC`, igual ao Commit 15. Review histórica sem review vigente gera STALE e campos de decisão atuais nulos. A última review histórica aparece apenas no detalhe em campo separado. PENDING humano é REVIEWED. Filtros SELECTED usam exclusivamente a review vigente, nunca um histórico selecionado.
+
+Latest observation: `captured_at DESC NULLS LAST, created_at DESC, id DESC`. A lista mostra a identidade da fonte da observação; se houver múltiplos official_ids na mesma fonte, escolhe o menor lexicalmente. Detalhe lista todas as identidades. Processo sem observação tem campos de observação nulos, sem criar description/deadline/valor/URL. `publication_at` projeta `published_at`; `proposal_deadline_at` projeta `closes_at`; `uf` projeta `state`; `municipality_name` projeta `locality`. Não existe título separado de processo no schema: busca e preview usam description. Não foi inventado título.
+
+**Paginação e filtros.** `Pagination(page=1, page_size=25)`, page >= 1, tamanho 1..100, rejeita booleanos/fracionários. `Page` retorna tuple de items, page/page_size/total_items/total_pages; vazio tem zero páginas; página além do fim preserva total e retorna vazio. Lista, fila, documentos, evidências documentais, timeline e rodadas são paginadas no PostgreSQL. COUNT e página compartilham snapshot.
+
+Filtros: operational_state, human_review_status, human_decision, source (qualquer identidade do processo), UF, municipality/locality, modality, intervalos de publicação/deadline/captura, has_documents, has_text, has_document_screening e substring case-insensitive de description. `ILIKE` parametrizado, sem FTS; %, _ e ! do caller são escapados como caracteres literais. Filtros de localidade/modalidade são igualdade exata. Busca e strings de filtro têm teto de 300 caracteres. Datas sempre timezone-aware; intervalo fechado no início e aberto no fim. Filtro captured usa o captured_at da observação vigente, sem substituir null por created_at.
+
+Sort fechado: publication_at, proposal_deadline_at, estimated_value, latest_capture_at, operational_resolved_at, reviewed_at; ASC/DESC. Default latest_capture_at DESC. NULLS LAST em ambas as direções e desempate por process_id ASC; nomes de coluna/direção não são SQL fornecido pelo caller. UUID é desempate de paginação, nunca critério de latest review. Timeline tem ordem própria ascendente, rodadas started_at descendente.
+
+**DashboardSummary e tempo.** Resposta composta por profile_id, period, CurrentSnapshot, PeriodActivity, PilotFunnel e SourceCoverageSummary. Não existem contagens temporais sem semântica explícita:
+
+| Projeção/métrica | Timestamp e escopo |
+|---|---|
+| CurrentSnapshot.processes_total | Cohort por `processes.created_at`, primeira persistência, não primeira publicação/captura. |
+| CurrentSnapshot estados operacionais/humanos | Latest atual de cada membro do cohort, sem filtrar suas resolutions/reviews por data; não é as-of histórico. |
+| CurrentSnapshot documentos/artifacts/texto | Estado atual dos documentos dos processos do cohort. Um documento posterior ao período pode estar no snapshot atual. |
+| PeriodActivity.records_collected, rounds_* | `collection_rounds.started_at`; soma records_collected e conta status persistido, incluindo RUNNING no total. |
+| PeriodActivity.processes_first_seen | `processes.created_at`. Não é records_collected, nem soma de unique_processes por rodada. |
+| PeriodActivity.documents_discovered | `process_documents.first_seen_at`. |
+| PeriodActivity.document_screenings_total | `document_screening_evaluations.evaluated_at`, perfil solicitado. |
+| PeriodActivity.operational_resolutions_total | `operational_resolutions.resolved_at`, perfil solicitado. |
+| PeriodActivity.human_reviews_total | `human_reviews.decided_at`, perfil da resolução. Inclui histórico/overrides do período. |
+| SourceCoverageSummary | Rodadas selecionadas por started_at; processos distintos observados nessas rodadas, agrupados por source. |
+
+Sem limites, o escopo temporal é todo o histórico. Com limites, nenhum deles é ignorado. CurrentSnapshot contém processes_total, current_candidate/pending/discarded, needs_review, selected, human_pending/discarded, stale_reviews, documents_total/with_artifact/with_text. Não conta SELECTED histórico como atual. PeriodActivity contém contagens de eventos e rounds_total/success/partial/failed; rodadas são independentes do perfil. Valores monetários permanecem Decimal; timestamps permanecem aware, sem conversão de apresentação para São Paulo.
+
+**PilotFunnel.** records_collected vem da atividade de rodadas no período. unique_processes é o tamanho do cohort. Initial candidate/pending/discarded usa latest initial de cada processo do cohort no perfil (`evaluated_at DESC, created_at DESC, engine_version DESC, id DESC`). document_evaluated conta processos do cohort com avaliação documental no perfil, não número de avaliações. Estados operational/human vêm do CurrentSnapshot. São estágios/unidades distintos e podem não ser monotônicos; não representar como percentuais de conversão sem análise adicional. `pilot_funnel` reutiliza a mesma composição do summary para não divergir.
+
+**Detail.** Identidades, description integral do processo (não PDF), campos atuais de lista, ids/timestamps/source da observação, latest initial e evidências category/configured_term/matched_text/field, latest document evaluation e cobertura, current operational com ids das avaliações usadas, rule/fingerprint/divergências, current human e latest historical human, counters. Latest document: evaluated_at/created_at/fingerprint/id descendentes. Avaliações latest podem ser mais novas que a resolution: os ids da resolução deixam essa diferença auditável, sem fingir que a resolução já as incorporou. `divergence_kind` deriva dos dois flags persistidos, permanecendo null quando não há comparação documental. Evidências documentais paginadas referem-se à latest avaliação documental do perfil, retornam página/snippet/source path/hash/document_id/negated e nunca texto integral da página.
+
+**Documentos e ZIP.** Latest acquisition por acquired_at/created_at/id descendentes; representa a última tentativa, inclusive se falhou. Não faz fallback silencioso para um artifact de tentativa anterior. has_artifact, has_text e counters atuais seguem essa mesma regra. Timeline preserva todas as tentativas anteriores. Acquisition status é projeção `COMPLETE`/`INCOMPLETE` de complete, ou null se não houve tentativa. SHA/type vêm do artifact persistido; não inventamos MIME/versão PNCP.
+
+Para cada source, latest extraction usa finished_at/created_at/extractor_name/extractor_version/id descendentes. `extractions` traz metadata por source, sem texto/error_text. has_text requer pages_with_text > 0 nessa extração. Sem extração, status/páginas/likely_scanned são null; extração UNSUPPORTED persistida com zero páginas permanece zero/UNSUPPORTED. Documento com fontes de estados distintos recebe agregação `MIXED`, com detalhes individuais preservados. Counters do detalhe contam artifacts distintos ligados às últimas tentativas, sources com extração e páginas das latest extractions, sem duplicar artifact compartilhado entre documentos.
+
+Membros ZIP vêm de archive entries/text sources persistidos. `safe` significa ausência dos flags has_unsafe_path/is_encrypted/is_symlink naquele entry; não certifica política global de tamanho/quantidade do ZIP. Sem source persistido, sha256/detected_type são null. `extracted` exige resultado DIGITAL_TEXT/EMPTY_TEXT/LIKELY_SCANNED; falha ou UNSUPPORTED não significam extração concluída. Diretórios e membros não processados permanecem consultáveis. Nenhuma query abre storage, baixa, inspeciona ou extrai arquivo.
+
+**Timeline.** UNION ALL de fatos persistidos, sem tabela nova. Página ordenada por occurred_at ASC, event_type ASC, reference_id ASC; mesmo evento de extração compartilhado não duplica por documento. Metadados pequenos indicam o timestamp usado, não incluem texto documental ou payload arbitrário:
+
+| Evento | Timestamp |
+|---|---|
+| PROCESS_FIRST_SEEN | processes.created_at (primeira persistência) |
+| PROCESS_CAPTURED | process_observations.captured_at; se null, created_at com fallback identificado nos metadados |
+| INITIAL_SCREENED | screening_evaluations.evaluated_at |
+| DOCUMENT_DISCOVERED | process_documents.first_seen_at |
+| DOCUMENT_ACQUIRED | document_artifacts.acquired_at; inclusive tentativa incompleta |
+| TEXT_EXTRACTED | text_extractions.finished_at; inclusive falha/unsupported |
+| DOCUMENT_SCREENED | document_screening_evaluations.evaluated_at |
+| OPERATIONAL_RESOLVED | operational_resolutions.resolved_at |
+| HUMAN_REVIEWED | human_reviews.decided_at |
+
+Eventos de decisões respeitam o perfil; coleta/documentos são compartilhados. Não há timestamps gerados na leitura nem eventos de sucesso inferidos a partir de falhas.
+
+**Rodadas e fontes.** CollectionRoundListItem/Detail preservam status, início/fim, páginas previstas/processadas/com erro, records_collected, unique_processes, métricas históricas, modalities_attempted e outcomes. Cada outcome expõe modalidade, complete, contagens, failed_page, indicador estruturado COLLECTION_FAILURE e quantidade de mapping_errors. Mensagens brutas de transporte e mapping errors não são devolvidas porque podem conter URLs/headers/segredos. SUCCESS com zero registros permanece distinto de FAILED/PARTIAL, mesmo com zero registros. SourceCoverageSummary enumera somente fontes realmente presentes nas rodadas selecionadas, sem inventar RHS.
+
+**Fila humana.** DashboardReviewQueueItem combina OpportunityListItem com ReviewQueueItem, sem alterar o DTO antigo. A política pura `in_queue` do Commit 15 é compilada para predicados SQL por enumeração finita de estados possíveis. Paridade testada contra a fila antiga. Todos os filtros/paginação ocorrem em SQL. NEEDS_REVIEW exclui descarte automático por padrão, permite inclusão explícita; STALE_REVIEW permanece consultável; queues SELECTED/HUMAN_PENDING/HUMAN_DISCARDED usam review vigente. O sort padrão do novo contrato é captura recente, não ranking comercial.
+
+**Segurança e not found.** OpportunityNotFoundError para process_id/source identity ausente, CollectionRoundNotFoundError para rodada ausente. Lookup source + official_id é parametrizado. DTOs não contêm DATABASE_URL, credenciais, headers, storage_key, requested/final download URLs ou erros brutos. URLs de referência persistidas passam por filtro conservador HTTP(S): rejeita credenciais embutidas, query/fragment, hosts locais/internos conhecidos e IPs não globais. URLs com query legítima também podem ser omitidas; não há resolução DNS/requisição na leitura. Source path de evidência/member é o identificador persistido do member, não storage key.
+
+**Performance e limites.** Lista/fila usam window functions, subqueries/aggregações e projeção de apenas 300 caracteres da descrição; nenhuma consulta individual por processo. Medição: 4 statements (SET READ ONLY + perfil + count + página), tanto com 7 como com 30 processos; 3 são SELECTs. Documentos buscam extrações e members em lote para a página. Detalhe usa queries especializadas por seção, sem consulta por página/evidência. Contagens, detalhes e summaries compartilham snapshot consistente; teste concorrente confirma que uma inserção durante a leitura só aparece no próximo snapshot. Offset e ILIKE são adequados ao piloto; não há promessa de latência em milhões de linhas, FTS ou índices novos.
+
+Sem dependências novas, schema/migrations intactos. Sem API HTTP, frontend, auth/RBAC, scheduler/GCP/Cloud Run, RHS novo, Google Sheets, IA/OpenAI/OCR/embeddings, Redis/Elasticsearch/materialized views ou export CSV/XLSX.
