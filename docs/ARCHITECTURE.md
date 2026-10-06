@@ -728,7 +728,7 @@ Decisões de `collector.application.document_screening`. Não substituem as seç
 
 ## 34. Resolução operacional
 
-Decisões de `collector.application.resolution`. Não substituem as seções anteriores. **Ainda não há decisão humana nem `SELECTED`/`CONFIRMED`.**
+Decisões de `collector.application.resolution`. Não substituem as seções anteriores. **Esta camada não produz decisão humana nem `SELECTED`/`CONFIRMED`.** A quarta camada está na seção 35.
 
 ```text
 PNCP description → Initial Screening
@@ -744,3 +744,54 @@ documents → artifact → text → Document Screening
 * Matriz: sem documento → replica initial (`INITIAL_SCREENING_ONLY`); positivo → `CANDIDATE` mesmo com cobertura incompleta; misto → `PENDING`; negativo completo com evidência de exclusão → `DISCARDED`; negativo incompleto ou não decisivo → `PENDING` (nunca descarte). Documento não decisivo **não** mantém `DISCARDED` inicial.
 * Fingerprint: SHA-256 de `profile.code/version`, versão do resolver, `initial:{hash do sinal inicial}` e `document:{document_set_fingerprint|NONE}`. Identidade inicial lógica = perfil + engine + campo + estado + reason + evidências ordenadas — **não** `evaluation.id`. O FK histórico usa o UUID da row.
 * Persistência append-only: `operational_resolutions` com `UNIQUE(process_id, profile_id, resolver_engine_version, resolution_fingerprint)`. Fila: `list_current_resolutions(state=...)`. Métricas próprias (`recovered_from_initial_discard`, `candidate_downgraded_to_discarded`); não entram em `CollectionRound.metrics`.
+
+## 35. Revisão humana auditável
+
+```text
+Initial Screening ──┐
+                    ├─ Operational Resolution ── Human Review
+Document Screening ─┘   CANDIDATE/PENDING/         SELECTED/PENDING/
+                        DISCARDED                 DISCARDED
+```
+
+As quatro camadas são históricas e independentes. Human Review não atualiza processos, avaliações, evidências ou resoluções. `SELECTED` é exclusivamente uma decisão humana de seguir para análise/atuação; não atesta habilitação, documentação completa, participação, proposta, vitória ou contrato. `HumanReviewDecision` é separado de `ScreeningStatus`; não aceita `CANDIDATE` nem `CONFIRMED`.
+
+**Aplicação.** `RecordHumanReviewCommand`, DTOs imutáveis, validação pura, compatibilidade `ALLOWED_REASONS`, política stale, derivação de status e filtros de fila estão em `application/human_review`. `HumanReviewRepository.record` é uma porta atômica: o adaptador precisa consultar latest e inserir na mesma transação. `HumanReviewQueries` define a porta de leitura. Não há SQLAlchemy na aplicação. O serviço fornece Clock interno em UTC (injetável para teste); o command não recebe horário do cliente.
+
+**Reviewer e motivos.** `ReviewerIdentity` exige id estável não vazio (até 200 caracteres) e permite display name (até 200). Essa identidade é fornecida pelo caller, não autenticada; autenticação e autorização ficam para a API futura. Qualquer caller válido pode revisar. Razões permitidas:
+
+| Decisão | Reason codes |
+|---|---|
+| SELECTED | RELEVANT_SCOPE_CONFIRMED, COMMERCIAL_INTEREST, TECHNICAL_FIT, REVIEWED_AND_APPROVED |
+| DISCARDED | OUT_OF_SCOPE, ISOLATED_INSTALLATION, EQUIPMENT_PURCHASE_ONLY, PARTS_SUPPLY_ONLY, DEADLINE_NOT_VIABLE, TECHNICAL_REQUIREMENT_NOT_VIABLE, COMMERCIAL_DECISION, DUPLICATE_OPPORTUNITY, OTHER |
+| PENDING | NEEDS_TECHNICAL_REVIEW, NEEDS_COMMERCIAL_REVIEW, NEEDS_DOCUMENT_REVIEW, INSUFFICIENT_INFORMATION, OTHER |
+
+Comentário opcional até 4000 caracteres; `OTHER` exige conteúdo não branco. Descartes por prazo, exigência técnica ou decisão comercial são escolhas humanas após análise. Não são regras automáticas. Valor, distância, modalidade, equipe, capacidade técnica e prazo continuam proibidos como critérios de descarte automático.
+
+**Modelo relacional.** `human_reviews`: UUID, sequência BIGINT identity única, FK obrigatória `operational_resolution_id`, reviewer id/display name, decisão, reason, comentário, chave global de idempotência, `allow_stale`, `was_stale_at_decision`, FK `latest_resolution_id_at_decision`, fingerprint e estado operacional de snapshot, decided_at/created_at. `process_id` e `profile_id` são obtidos pela FK da resolução (expostos no DTO), evitando duplicação e inconsistência. A FK continua a fonte principal. Não duplicamos razão operacional nem evidências. Cadeia: review → resolution → initial/document evaluation → evidence → extraction page.
+
+Migration 0008 cria constraints de decisão/motivo, reviewer, chave, comentário e flags stale, índice de latest e triggers. Um trigger valida os snapshots e o mesmo processo/perfil para as duas resoluções referenciadas; outro rejeita UPDATE/DELETE. Não há métodos de edição/exclusão. Mudar de ideia exige nova review/chave. TRUNCATE continua disponível à infraestrutura de testes; não existe recurso de exclusão na aplicação. Administradores do banco ainda podem alterar schema/desativar triggers.
+
+**Idempotência e concorrência.** O caller fornece chave global não vazia até 200 caracteres. Igualdade do payload é exata, incluindo resolution, reviewer/display name, decisão, motivo, comentário e `allow_stale`; timestamps e flags derivados não entram. Retry idêntico retorna antes da verificação stale, mesmo que outra resolução tenha surgido. Uma chave repetida com payload diferente gera `IdempotencyConflictError`. Advisory lock transacional por hash da chave serializa retries; UNIQUE e `INSERT ON CONFLICT DO NOTHING` protegem o banco. Colisões de hash só causam espera adicional. Não há lock distribuído.
+
+Latest operacional usa processo **e perfil**, com a ordem já existente: `resolved_at DESC, created_at DESC, resolution_fingerprint DESC`. Resolução diferente da latest gera `StaleOperationalResolutionError` com ambos os ids. `allow_stale=True` permite decisão histórica e registra stale e latest observada; nunca transfere a decisão para outra resolução.
+
+**Limitação de stale race.** A verificação ocorre na mesma transação do INSERT, sob READ COMMITTED. Não bloqueia a gravação de resoluções. Uma nova resolução pode ser confirmada entre SELECT e INSERT: os campos de auditoria registram a latest observada no check, não prometem exclusão de concorrência. A consulta posterior detecta STALE. Um teste provoca exatamente essa janela. Eliminar essa janela exigiria coordenação também com escritores de resolução; não introduzimos SERIALIZABLE global nem alteramos a terceira camada.
+
+**Estado derivado por processo/perfil.** A review atual é a mais recente **sobre a resolução vigente**, ordenada por `decided_at DESC, created_at DESC, sequence DESC`. Nunca por UUID. Revisão de uma resolução antiga, mesmo gravada depois, não substitui a review da atual.
+
+| Status | Definição |
+|---|---|
+| UNREVIEWED | Não há review da resolução atual nem histórico humano no processo/perfil. |
+| REVIEWED | Há review sobre a resolução atual; a decisão pode ser SELECTED, DISCARDED ou PENDING. |
+| STALE | Há histórico humano, mas nenhuma review sobre a resolução vigente. |
+
+Sem resolução, `review_status_for_process` retorna `None`. STALE tem decisão/reason/reviewer atuais nulos; a decisão antiga permanece consultável no histórico. Nova review vigente retorna REVIEWED. PENDING humano é revisão registrada e inconclusiva, não ausência de revisão.
+
+**Filas e métricas.** `NEEDS_REVIEW`: CANDIDATE/PENDING sem review vigente, incluindo STALE. `include_operational_discarded=True` também inclui descarte automático sem review; não cria review. Filas SELECTED/HUMAN_DISCARDED/HUMAN_PENDING usam a decisão vigente, inclusive quando alguém revisou um descarte automático. STALE_REVIEW expõe todo histórico obsoleto sem review vigente, inclusive descarte automático. A consulta sem filtro exclui apenas descartes automáticos sem review vigente, salvo inclusão explícita.
+
+`ReviewQueueItem` expõe process/profile, resolution id/state/reason/resolved_at, human status/decision/reason/reviewer/reviewed_at; não carrega textos documentais. A query ranqueia resoluções e reviews em SQL e lê estado/histórico no mesmo statement. Ordem da fila: resolved_at/created_at/fingerprint descendentes; process/profile desempata entre escopos. Filtros finais são puros na aplicação. Para o piloto, a leitura materializa os itens atuais; paginação SQL fica para evolução com volume real.
+
+`HumanReviewSummary` independente: current_resolutions, needs_review (exclui descarte automático), reviewed, stale_reviews (todos os estados operacionais), selected, human_discarded, human_pending, reviews_total e stale_overrides_total. Opcionais filtros por perfil. Current conta pares processo/perfil, histórico conta linhas. Summary usa snapshot REPEATABLE READ para manter seus dois SELECTs coerentes, sem locks de escrita. Não altera `CollectionRound.metrics`.
+
+Sem novas dependências de runtime. Fora do escopo: CONFIRMED, auth/RBAC/accounts, dashboard/API/Next.js, threads/anexos humanos, edição/exclusão, IA/LLM/OpenAI/OCR, e-mail/Telegram/GCP/RHS, proposta ou participação automática.

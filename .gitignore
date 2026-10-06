@@ -20,6 +20,7 @@ build/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.local-tools/
 
 # Artefatos baixados (nunca commitar PDF/ZIP/binários)
 var/artifacts/

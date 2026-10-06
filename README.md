@@ -73,7 +73,7 @@ SHA-256 é identidade técnica do conteúdo observado, não versão oficial. O a
 
 `ExtractArtifactText.extract(artifact)` lê PDFs (diretos ou members de ZIP seguro) com `pypdf`, página a página. Sem OCR. PDF escaneado/sem texto vira `LIKELY_SCANNED`.
 
-## Triagem em três camadas
+## Triagem e revisão em quatro camadas
 
 ```text
 PNCP description → Initial Screening
@@ -83,7 +83,17 @@ PNCP description → Initial Screening
 documents → artifact → text → Document Screening
 ```
 
-A triagem inicial lê a `description` PNCP. A documental lê o texto extraído. A resolução operacional decide o estado de trabalho **sem sobrescrever** as duas primeiras. Documento decisivo com cobertura completa pode recuperar um `DISCARDED` inicial ou confirmar um descarte. Ausência de evidência documental **não** descarta. Sem documento, o operacional replica a inicial. Ainda **não** há `SELECTED`/`CONFIRMED` nem decisão humana.
+A triagem inicial lê a `description` PNCP. A documental lê o texto extraído. A resolução operacional decide o estado de trabalho **sem sobrescrever** as duas primeiras. Documento decisivo com cobertura completa pode recuperar um `DISCARDED` inicial ou confirmar um descarte. Ausência de evidência documental **não** descarta. Sem documento, o operacional replica a inicial.
+
+A quarta camada é `Human Review`: uma pessoa registra `SELECTED`, `PENDING` ou `DISCARDED` sobre uma resolução específica. `SELECTED` significa seguir para análise/atuação, sem confirmar habilitação, participação, proposta ou contrato. `CONFIRMED` não é aceito. O resolver continua limitado a `CANDIDATE/PENDING/DISCARDED`.
+
+`RecordHumanReview.execute(RecordHumanReviewCommand(...))`, em `collector.application.human_review`, recebe resolução, reviewer, decisão, motivo, comentário opcional, chave de idempotência do caller e `allow_stale=False`. O adaptador é `SqlAlchemyHumanReviewRepository`. Reviewer é identidade declarada, **não autenticada**; não há RBAC neste piloto.
+
+Reviews são append-only; mudar de ideia cria nova linha. `OTHER` exige comentário e comentários têm limite de 4000 caracteres. Retry com a mesma chave global e payload idêntico retorna a mesma review; payload diferente falha. Resolução antiga é rejeitada por padrão; override explícito fica auditado. Nova resolução não herda decisão humana: exige revisão novamente.
+
+As consultas `review_status_for_process(process_id, profile_id)`, `latest_review_for_resolution`, `list_reviews_for_process`, `list_queue` e `summary` preparam a leitura do dashboard. A fila distingue `NEEDS_REVIEW`, `SELECTED`, `HUMAN_DISCARDED`, `HUMAN_PENDING` e `STALE_REVIEW`. Descartes automáticos sem review ficam fora da fila principal, mas podem ser incluídos explicitamente. Nenhum estado humano é gravado em `processes` ou em métricas de coleta.
+
+Migration: `alembic upgrade head` aplica até `0008_human_reviews`, inclusive em banco vazio. Detalhes de concorrência, status e auditoria estão em [ARCHITECTURE.md](docs/ARCHITECTURE.md#35-revisão-humana-auditável).
 
 ## Camadas do coletor
 
