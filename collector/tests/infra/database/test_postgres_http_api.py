@@ -6,10 +6,19 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from collector.api.app import create_app
+from collector.api.security import AuthenticatedPrincipal
 from collector.application.read_model.service import DashboardQueries
 from collector.infra.database.read_model_store import SqlAlchemyReadModelStore
 
 pytestmark = pytest.mark.postgres
+
+
+class DashboardAuthenticator:
+    def authenticate(self, token):
+        assert token == "postgres-test-token"
+        return AuthenticatedPrincipal(
+            "https://issuer.test.example", "postgres-reader", None, frozenset({"dashboard:read"})
+        )
 
 def test_ready_and_zero_record_round_statuses_over_real_postgres(migrated_engine, db_session):
     now = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
@@ -25,7 +34,10 @@ def test_ready_and_zero_record_round_statuses_over_real_postgres(migrated_engine
         connection.execute(statement, {"id": success_id, "now": now, "status": "SUCCESS"})
         connection.execute(statement, {"id": failed_id, "now": now, "status": "FAILED"})
     factory = sessionmaker(bind=migrated_engine, autoflush=False, expire_on_commit=False)
-    client = TestClient(create_app(queries=DashboardQueries(SqlAlchemyReadModelStore(factory)), session_factory=factory))
+    client = TestClient(create_app(
+        queries=DashboardQueries(SqlAlchemyReadModelStore(factory)), session_factory=factory,
+        authenticator=DashboardAuthenticator(),
+    ), headers={"Authorization": "Bearer postgres-test-token"})
     assert client.get("/ready").json() == {"status": "ready"}
     response = client.get("/api/v1/collection-rounds", params={"page_size": 100})
     assert response.status_code == 200

@@ -913,9 +913,9 @@ POST /api/v1/reviews → RecordHumanReview → PostgreSQL
 
 Esta seção estende a seção 37 e substitui, somente para revisão humana, a restrição
 anterior de API integralmente read-only. A única escrita HTTP deste commit é
-`POST /api/v1/reviews`. As rotas GET continuam públicas e sem autenticação na
-aplicação. A API não pode ser exposta publicamente sem uma camada adicional de
-proteção de rede/identidade que também cubra essas leituras. A rota de escrita reutiliza
+`POST /api/v1/reviews`. No Commit 18, as rotas GET ainda eram públicas e exigiam
+proteção adicional de implantação; a seção 39 substitui essa limitação ao exigir
+OIDC e `dashboard:read` nas leituras operacionais. A rota de escrita reutiliza
 `RecordHumanReview` e `SqlAlchemyHumanReviewRepository`; decisão/motivo,
 idempotência, stale, append-only, auditoria e atomicidade continuam pertencendo
 às camadas existentes. A borda FastAPI não duplica essas regras e não compartilha
@@ -964,3 +964,52 @@ refresh token, revogação própria, RBAC em banco ou endpoint genérico de escr
 
 Sem migration nova: a identidade OIDC derivada usa os campos auditáveis de reviewer
 já existentes em `human_reviews`.
+
+---
+
+## 39. Proteção OIDC das consultas operacionais
+
+```text
+OIDC Provider → Bearer JWT → JWKS Validation
+                                  ├─ dashboard:read → GET operacional / ready
+                                  └─ reviews:write  → POST /api/v1/reviews
+```
+
+As consultas operacionais do dashboard deixam de ser públicas. Todas as rotas GET
+sob `/api/v1`, além de `/ready`, exigem a mesma autenticação OIDC Bearer/JWKS da
+seção 38 e a permissão explícita `dashboard:read`. A verificação é centralizada e
+reutiliza `AuthenticatedPrincipal`; não há segundo validador JWT, segundo cliente
+JWKS, RBAC no PostgreSQL ou permissão implícita. `reviews:write` não concede
+`dashboard:read`, `dashboard:read` não concede `reviews:write`, e um principal pode
+receber ambas somente quando o provedor as conceder explicitamente.
+
+Os contratos de `DashboardQueries`, `SqlAlchemyReadModelStore`, filtros, paginação,
+ordenação, schemas e respostas de sucesso permanecem inalterados. A autenticação e
+autorização ocorrem antes de qualquer consulta operacional. Credencial ausente ou
+inválida retorna 401; principal sem `dashboard:read`, 403; indisponibilidade do
+serviço JWKS/configuração OIDC, 503; falha interna inesperada, 500 sanitizado. Tokens
+e headers de autorização não são registrados. As transações de leitura continuam
+`READ ONLY / REPEATABLE READ` e cada operação mantém sua própria sessão.
+
+`/health` é a única rota funcional pública: retorna somente o estado básico do
+processo e não acessa PostgreSQL nem dados operacionais. `/ready` consulta o banco e,
+por isso, também exige `dashboard:read`. Não foi criado health check público com
+consulta a dependências ou retorno de informações operacionais.
+
+**Documentação e OpenAPI.** Em `development` e testes, `/docs`, `/redoc` e
+`/openapi.json` permanecem disponíveis para desenvolvimento do cliente. Em
+`ENVIRONMENT=production` ou `prod`, os três endpoints são desabilitados por padrão.
+`API_DOCS_ENABLED=true` é um opt-in explícito; sua habilitação em produção depende
+de proteção segura de rede/identidade na implantação. O OpenAPI usa HTTP Bearer com
+`bearerFormat: JWT`, sem simular um fluxo OAuth2, e documenta `dashboard:read` nas
+leituras protegidas e `reviews:write` na escrita.
+
+Sem `OIDC_ISSUER`, `OIDC_AUDIENCE` e `OIDC_JWKS_URL`, as rotas protegidas falham de
+forma fechada: ausência de credencial continua 401 e uma credencial Bearer não pode
+ser validada, resultando em 503. Produção depende da configuração de um provedor
+OIDC real, URL JWKS HTTPS, audience/issuer corretos, concessão dos scopes mínimos e
+TLS/proteção de rede. O cache JWKS e suas limitações de rotação/revogação permanecem
+os definidos na seção 38.
+
+Sem migration, endpoint de escrita adicional, usuário/senha local ou mudança nas
+regras de coleta, triagem, revisão humana, idempotência, stale e auditoria.

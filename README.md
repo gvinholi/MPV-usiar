@@ -40,12 +40,16 @@ cd collector
 uvicorn collector.api.app:create_app --factory --reload
 ```
 
-`/health` não acessa o banco; `/ready` verifica a conexão. A documentação está em
-`/docs` e `/openapi.json`. As rotas GET permanecem read-only e públicas, sem
-autenticação na aplicação. A API inteira não deve ser exposta publicamente sem uma
-camada adicional de proteção de rede/identidade para essas rotas. A única escrita
-HTTP é `POST /api/v1/reviews`, protegida por Bearer JWT OIDC e pela permissão
-`reviews:write`.
+`/health` não acessa o banco e permanece público. `/ready`, que verifica a conexão,
+e todas as rotas GET operacionais exigem Bearer JWT OIDC com a permissão
+`dashboard:read`. A única escrita HTTP é `POST /api/v1/reviews`, protegida pela
+permissão independente `reviews:write`. Uma permissão não concede a outra; um
+principal pode receber ambas explicitamente.
+
+Em desenvolvimento e testes, a documentação está em `/docs`, `/redoc` e
+`/openapi.json`. Em `ENVIRONMENT=production` ou `prod`, esses endpoints ficam
+desabilitados por padrão. `API_DOCS_ENABLED=true` permite habilitação explícita,
+que deve ser acompanhada da proteção de rede e identidade adequada à implantação.
 
 Exemplos de consulta (o perfil deve ser identificado por `profile_id` ou por um
 `profile_code` não ambíguo):
@@ -55,7 +59,7 @@ GET /api/v1/opportunities?profile_code=USIAR&page=1&page_size=25
 GET /api/v1/opportunities/by-source?source=PNCP&official_id=00509968000148%2F2026%2F3341&profile_code=USIAR
 ```
 
-Para habilitar a rota de revisão, configure os valores aprovados para o provedor
+Para habilitar as rotas protegidas, configure os valores aprovados para o provedor
 OIDC compatível:
 
 ```text
@@ -66,10 +70,12 @@ OIDC_ALGORITHMS=RS256
 OIDC_JWKS_CACHE_SECONDS=300
 ```
 
-Sem issuer, audience e JWKS URL, a rota de escrita falha de forma fechada com 503.
+Sem issuer, audience e JWKS URL, qualquer rota protegida falha de forma fechada com
+503 quando recebe uma credencial Bearer; uma requisição sem credencial retorna 401.
 O provedor de produção ainda não foi escolhido; a implantação depende dessa decisão
-e da concessão do scope `reviews:write`. Tokens não devem ser colocados em arquivos
-versionados nem registrados em logs.
+e da concessão explícita dos scopes `dashboard:read` e/ou `reviews:write` conforme a
+função do principal. Tokens não devem ser colocados em arquivos versionados nem
+registrados em logs.
 
 `OIDC_JWKS_URL` deve ser uma URL HTTPS válida, sem credenciais embutidas. O conjunto
 JWKS é mantido em cache pelo TTL configurado, entre 1 e 3600 segundos; chaves

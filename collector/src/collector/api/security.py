@@ -62,6 +62,12 @@ class TokenAuthenticator(Protocol):
     def authenticate(self, token: str) -> AuthenticatedPrincipal: ...
 
 
+def require_permission(principal: AuthenticatedPrincipal, permission: str) -> AuthenticatedPrincipal:
+    if permission not in principal.permissions:
+        raise PermissionDeniedError(f"{permission} required")
+    return principal
+
+
 class OidcJwtAuthenticator:
     def __init__(self, *, issuer: str, audience: str, jwks_url: str,
                  algorithms: tuple[str, ...] = ("RS256",), cache_seconds: int = 300):

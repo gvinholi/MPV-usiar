@@ -6,6 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from collector.api.app import create_app
+from collector.api.security import (AuthenticatedPrincipal, AuthenticationError,
+    AuthenticationUnavailableError)
 from collector.api.settings import ApiSettings
 from collector.application.human_review.models import HumanReviewStatus
 from collector.application.read_model.errors import (AmbiguousProfileError, CollectionRoundNotFoundError,
@@ -68,10 +70,36 @@ class Session:
         if self.fails: raise RuntimeError("postgresql://secret-user:super-secret@internal-host/db SELECT secret")
 
 
+class Authenticator:
+    def __init__(self, permissions=frozenset({"dashboard:read"}), failure=None):
+        self.permissions = permissions
+        self.failure = failure
+
+    def authenticate(self, token):
+        if self.failure:
+            raise self.failure
+        if token != "valid-token":
+            raise AuthenticationError("invalid synthetic token")
+        return AuthenticatedPrincipal(
+            "https://issuer.test.example", "dashboard-user", "Dashboard User", self.permissions
+        )
+
+
+def api_client(fake, *, authenticator=None, session_factory=None, settings=None):
+    value = TestClient(create_app(
+        queries=fake,
+        session_factory=session_factory,
+        settings=settings,
+        authenticator=authenticator or Authenticator(),
+    ), raise_server_exceptions=False)
+    value.headers["Authorization"] = "Bearer valid-token"
+    return value
+
+
 @pytest.fixture
 def fake(): return FakeQueries()
 @pytest.fixture
-def client(fake): return TestClient(create_app(queries=fake, session_factory=lambda: Session()), raise_server_exceptions=False)
+def client(fake): return api_client(fake, session_factory=lambda: Session())
 
 
 def test_health_ready_and_openapi(client):
@@ -97,7 +125,7 @@ def test_list_contract_decimal_datetime_uuid_enum_null_unicode(client):
 
 
 def test_filters_reach_application(fake):
-    client = TestClient(create_app(queries=fake))
+    client = api_client(fake)
     params = {"profile_code":"USIAR", "operational_state":"CANDIDATE", "human_review_status":"UNREVIEWED",
         "human_decision":"SELECTED", "source":"PNCP", "uf":"sp", "municipality":"São Paulo", "modality":"Pregão",
         "search":"climatização", "has_documents":"true", "has_text":"false", "has_document_screening":"true",
@@ -149,19 +177,19 @@ def test_explicit_source_contract_validation_remains_422(client):
     (RuntimeError("secret SQL C:/private"),500,"INTERNAL_ERROR")])
 def test_safe_errors(fake, failure, status, code):
     fake.failure = failure
-    response = TestClient(create_app(queries=fake), raise_server_exceptions=False).get(f"/api/v1/opportunities/{PROCESS_ID}", params={"profile_id":str(PROFILE_ID)})
+    response = api_client(fake).get(f"/api/v1/opportunities/{PROCESS_ID}", params={"profile_id":str(PROFILE_ID)})
     assert response.status_code == status and response.json()["error"]["code"] == code
     assert "secret" not in response.text and "Traceback" not in response.text
 
 
 def test_round_not_found(fake):
     fake.failure = CollectionRoundNotFoundError()
-    response = TestClient(create_app(queries=fake), raise_server_exceptions=False).get(f"/api/v1/collection-rounds/{ROUND_ID}")
+    response = api_client(fake).get(f"/api/v1/collection-rounds/{ROUND_ID}")
     assert response.status_code == 404 and response.json()["error"]["code"] == "COLLECTION_ROUND_NOT_FOUND"
 
 
 def test_ready_failure_does_not_leak(fake):
-    response = TestClient(create_app(queries=fake, session_factory=lambda:Session(True))).get("/ready")
+    response = api_client(fake, session_factory=lambda:Session(True)).get("/ready")
     assert response.status_code == 503
     for secret in ("secret-user", "super-secret", "internal-host", "SELECT"): assert secret not in response.text
 
@@ -181,7 +209,7 @@ def test_request_id_and_cors(fake):
 def test_error_always_has_request_id_and_logging_is_safe(fake, caplog):
     fake.failure = RuntimeError("postgresql://secret-user:super-secret@internal-host/db Authorization Cookie")
     with caplog.at_level("INFO", logger="collector.api.app"):
-        response = TestClient(create_app(queries=fake), raise_server_exceptions=False).get(
+        response = api_client(fake).get(
             f"/api/v1/opportunities/{PROCESS_ID}", params={"profile_id":str(PROFILE_ID)},
             headers={"X-Request-ID":"request-safe"})
     assert response.status_code == 500 and response.headers["X-Request-ID"] == "request-safe"
@@ -200,3 +228,107 @@ def test_detail_payload_has_no_blob_text_or_storage_path(client):
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
 def test_write_methods_are_not_allowed(client, method):
     assert getattr(client, method)("/api/v1/opportunities").status_code == 405
+
+
+OPERATIONAL_GETS = (
+    ("/ready", {}),
+    ("/api/v1/dashboard/summary", {"profile_id": str(PROFILE_ID)}),
+    ("/api/v1/opportunities", {"profile_id": str(PROFILE_ID)}),
+    ("/api/v1/opportunities/by-source", {
+        "source": "PNCP", "official_id": "00509968000148/2026/3341", "profile_id": str(PROFILE_ID),
+    }),
+    (f"/api/v1/opportunities/{PROCESS_ID}", {"profile_id": str(PROFILE_ID)}),
+    (f"/api/v1/opportunities/{PROCESS_ID}/documents", {}),
+    (f"/api/v1/opportunities/{PROCESS_ID}/document-evidence", {"profile_id": str(PROFILE_ID)}),
+    (f"/api/v1/opportunities/{PROCESS_ID}/timeline", {"profile_id": str(PROFILE_ID)}),
+    ("/api/v1/review-queue", {"profile_id": str(PROFILE_ID)}),
+    ("/api/v1/collection-rounds", {}),
+    (f"/api/v1/collection-rounds/{ROUND_ID}", {}),
+)
+
+
+@pytest.mark.parametrize(("path", "params"), OPERATIONAL_GETS)
+def test_every_operational_get_requires_token(fake, path, params):
+    response = TestClient(create_app(queries=fake, session_factory=lambda: Session(),
+        authenticator=Authenticator()), raise_server_exceptions=False).get(path, params=params)
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_CREDENTIALS"
+
+
+@pytest.mark.parametrize(("path", "params"), OPERATIONAL_GETS)
+def test_reviews_write_does_not_grant_dashboard_read(fake, path, params):
+    response = api_client(fake, authenticator=Authenticator(frozenset({"reviews:write"})),
+                          session_factory=lambda: Session()).get(path, params=params)
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_invalid_token_is_401_for_operational_get(fake):
+    response = api_client(fake).get("/api/v1/collection-rounds",
+                                    headers={"Authorization": "Bearer invalid-token"})
+    assert response.status_code == 401
+
+
+def test_principal_with_both_permissions_can_read(fake):
+    response = api_client(fake, authenticator=Authenticator(
+        frozenset({"dashboard:read", "reviews:write"})
+    )).get("/api/v1/collection-rounds")
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(("failure", "status", "code"), [
+    (AuthenticationUnavailableError("provider secret"), 503, "AUTHENTICATION_UNAVAILABLE"),
+    (RuntimeError("internal authenticator secret"), 500, "INTERNAL_ERROR"),
+])
+def test_operational_get_authentication_failures_are_sanitized(fake, failure, status, code):
+    response = api_client(fake, authenticator=Authenticator(failure=failure)).get(
+        "/api/v1/collection-rounds"
+    )
+    assert response.status_code == status
+    assert response.json()["error"]["code"] == code
+    assert "secret" not in response.text
+
+
+def test_operational_get_token_is_not_logged(fake, caplog):
+    secret = "valid-token"
+    with caplog.at_level("INFO", logger="collector.api.app"):
+        response = api_client(fake).get(
+            "/api/v1/collection-rounds", headers={"Authorization": f"Bearer {secret}"}
+        )
+    assert response.status_code == 200
+    assert secret not in "\n".join(record.getMessage() for record in caplog.records)
+
+
+def test_openapi_documents_dashboard_permission_on_all_operational_gets(fake):
+    document = api_client(fake).get("/openapi.json").json()
+    protected_paths = {path.replace(str(PROCESS_ID), "{process_id}").replace(str(ROUND_ID), "{round_id}")
+                       for path, _params in OPERATIONAL_GETS}
+    actual_operational_gets = {
+        path for path, operations in document["paths"].items()
+        if "get" in operations and (path.startswith("/api/v1/") or path == "/ready")
+    }
+    assert actual_operational_gets == protected_paths
+    for path in protected_paths:
+        operation = document["paths"][path]["get"]
+        assert operation["security"] == [{"OIDC Bearer": []}]
+        assert "dashboard:read" in operation["description"]
+        assert {"401", "403", "500", "503"} <= set(operation["responses"])
+    assert "security" not in document["paths"]["/health"]["get"]
+
+
+def test_documentation_is_disabled_by_default_in_production_and_can_be_enabled(fake):
+    production = TestClient(create_app(queries=fake, settings=ApiSettings(environment="production")))
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert production.get(path).status_code == 404
+    enabled = TestClient(create_app(
+        queries=fake, settings=ApiSettings(environment="production", api_docs_enabled=True)
+    ))
+    assert enabled.get("/openapi.json").status_code == 200
+
+
+def test_protected_get_fails_closed_when_oidc_is_not_configured(fake):
+    response = TestClient(create_app(queries=fake), raise_server_exceptions=False).get(
+        "/api/v1/collection-rounds", headers={"Authorization": "Bearer token"}
+    )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "AUTHENTICATION_UNAVAILABLE"

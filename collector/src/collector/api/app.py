@@ -29,11 +29,15 @@ from .schemas import (CollectionRoundDetailResponse, CollectionRoundListItemResp
     OpportunityDocumentResponse, OpportunityListItemResponse, PageResponse, ReviewCreateRequest,
     ReviewCreatedResponse, TimelineItemResponse)
 from .security import (AuthenticatedPrincipal, AuthenticationError, AuthenticationUnavailableError,
-    OidcJwtAuthenticator, PermissionDeniedError, TokenAuthenticator)
+    OidcJwtAuthenticator, PermissionDeniedError, TokenAuthenticator, require_permission)
 from .settings import ApiSettings
 
 log = logging.getLogger(__name__)
 ERROR_RESPONSES = {404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+AUTH_RESPONSES = {401: {"model": ErrorResponse}, 403: {"model": ErrorResponse},
+                  500: {"model": ErrorResponse}, 503: {"model": ErrorResponse}}
+READ_RESPONSES = {**ERROR_RESPONSES, **AUTH_RESPONSES}
+DASHBOARD_READ_DESCRIPTION = "Exige Bearer JWT OIDC autenticado com a permissão dashboard:read."
 
 
 class ContractValidationError(Exception):
@@ -81,7 +85,13 @@ def create_app(*, queries=None, session_factory=None, settings: ApiSettings | No
             jwks_url=settings.oidc_jwks_url, algorithms=settings.oidc_algorithms,
             cache_seconds=settings.oidc_jwks_cache_seconds,
         )
-    app = FastAPI(title="Collector Read API", version="1.0.0")
+    app = FastAPI(
+        title="Collector Read API",
+        version="1.0.0",
+        docs_url="/docs" if settings.docs_enabled else None,
+        redoc_url="/redoc" if settings.docs_enabled else None,
+        openapi_url="/openapi.json" if settings.docs_enabled else None,
+    )
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=False,
                            allow_methods=["GET", "POST"],
@@ -94,7 +104,8 @@ def create_app(*, queries=None, session_factory=None, settings: ApiSettings | No
         auto_error=False,
         bearerFormat="JWT",
         scheme_name="OIDC Bearer",
-        description="OIDC Bearer JWT. POST /api/v1/reviews exige a permissão reviews:write.",
+        description=("OIDC Bearer JWT. Consultas operacionais exigem dashboard:read; "
+                     "POST /api/v1/reviews exige reviews:write."),
     )
 
     def authenticated(credentials: Annotated[HTTPAuthorizationCredentials | None, Security(bearer)]) -> AuthenticatedPrincipal:
@@ -105,9 +116,10 @@ def create_app(*, queries=None, session_factory=None, settings: ApiSettings | No
         return app.state.authenticator.authenticate(credentials.credentials)
 
     def review_writer(principal: Annotated[AuthenticatedPrincipal, Depends(authenticated)]) -> AuthenticatedPrincipal:
-        if "reviews:write" not in principal.permissions:
-            raise PermissionDeniedError("reviews:write required")
-        return principal
+        return require_permission(principal, "reviews:write")
+
+    def dashboard_reader(principal: Annotated[AuthenticatedPrincipal, Depends(authenticated)]) -> AuthenticatedPrincipal:
+        return require_permission(principal, "dashboard:read")
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
@@ -176,7 +188,8 @@ def create_app(*, queries=None, session_factory=None, settings: ApiSettings | No
     @app.get("/health", response_model=HealthResponse)
     def health(): return HealthResponse(status="ok")
 
-    @app.get("/ready", response_model=HealthResponse, responses={503: {"model": ErrorResponse}})
+    @app.get("/ready", response_model=HealthResponse, dependencies=[Depends(dashboard_reader)],
+             description=DASHBOARD_READ_DESCRIPTION, responses=AUTH_RESPONSES)
     def ready():
         try:
             if app.state.session_factory is None: raise RuntimeError("readiness dependency unavailable")
@@ -184,13 +197,17 @@ def create_app(*, queries=None, session_factory=None, settings: ApiSettings | No
         except Exception: return _error(503, "NOT_READY", "Aplicação indisponível.")
         return HealthResponse(status="ready")
 
-    @app.get("/api/v1/dashboard/summary", response_model=DashboardSummaryResponse, responses=ERROR_RESPONSES)
+    @app.get("/api/v1/dashboard/summary", response_model=DashboardSummaryResponse,
+             dependencies=[Depends(dashboard_reader)], description=DASHBOARD_READ_DESCRIPTION,
+             responses=READ_RESPONSES)
     def summary(profile_id: UUID | None = None, profile_code: str | None = None,
                 from_datetime: datetime | None = None, to_datetime: datetime | None = None):
         dto = queries.dashboard_summary(_scope(profile_id, profile_code), _range(from_datetime, to_datetime))
         return to_response(dto, DashboardSummaryResponse)
 
-    @app.get("/api/v1/opportunities", response_model=PageResponse[OpportunityListItemResponse], responses=ERROR_RESPONSES)
+    @app.get("/api/v1/opportunities", response_model=PageResponse[OpportunityListItemResponse],
+             dependencies=[Depends(dashboard_reader)], description=DASHBOARD_READ_DESCRIPTION,
+             responses=READ_RESPONSES)
     def opportunities(profile_id: UUID | None = None, profile_code: str | None = None,
                       page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
                       sort: SortField = SortField.LATEST_CAPTURE_AT, direction: SortDirection = SortDirection.DESC,
@@ -213,45 +230,61 @@ def create_app(*, queries=None, session_factory=None, settings: ApiSettings | No
         dto = queries.list_opportunities(_scope(profile_id, profile_code), filters, _page(page, page_size), _sort(sort, direction))
         return to_page(dto, OpportunityListItemResponse)
 
-    @app.get("/api/v1/opportunities/by-source", response_model=OpportunityDetailResponse, responses=ERROR_RESPONSES)
+    @app.get("/api/v1/opportunities/by-source", response_model=OpportunityDetailResponse,
+             dependencies=[Depends(dashboard_reader)], description=DASHBOARD_READ_DESCRIPTION,
+             responses=READ_RESPONSES)
     def by_source(source: str, official_id: str, profile_id: UUID | None = None, profile_code: str | None = None):
         return to_response(queries.get_opportunity_by_source_identity(
             _source(source), _official_id(official_id), _scope(profile_id, profile_code),
         ), OpportunityDetailResponse)
 
-    @app.get("/api/v1/opportunities/{process_id}", response_model=OpportunityDetailResponse, responses=ERROR_RESPONSES)
+    @app.get("/api/v1/opportunities/{process_id}", response_model=OpportunityDetailResponse,
+             dependencies=[Depends(dashboard_reader)], description=DASHBOARD_READ_DESCRIPTION,
+             responses=READ_RESPONSES)
     def detail(process_id: UUID, profile_id: UUID | None = None, profile_code: str | None = None):
         return to_response(queries.get_opportunity(process_id, _scope(profile_id, profile_code)), OpportunityDetailResponse)
 
-    @app.get("/api/v1/opportunities/{process_id}/documents", response_model=PageResponse[OpportunityDocumentResponse], responses=ERROR_RESPONSES)
+    @app.get("/api/v1/opportunities/{process_id}/documents", response_model=PageResponse[OpportunityDocumentResponse],
+             dependencies=[Depends(dashboard_reader)], description=DASHBOARD_READ_DESCRIPTION,
+             responses=READ_RESPONSES)
     def documents(process_id: UUID, page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100)):
         return to_page(queries.documents(process_id, _page(page, page_size)), OpportunityDocumentResponse)
 
-    @app.get("/api/v1/opportunities/{process_id}/document-evidence", response_model=PageResponse[DocumentEvidenceResponse], responses=ERROR_RESPONSES)
+    @app.get("/api/v1/opportunities/{process_id}/document-evidence", response_model=PageResponse[DocumentEvidenceResponse],
+             dependencies=[Depends(dashboard_reader)], description=DASHBOARD_READ_DESCRIPTION,
+             responses=READ_RESPONSES)
     def evidence(process_id: UUID, profile_id: UUID | None = None, profile_code: str | None = None,
                  page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100)):
         return to_page(queries.document_evidence(process_id, _scope(profile_id, profile_code), _page(page, page_size)), DocumentEvidenceResponse)
 
-    @app.get("/api/v1/opportunities/{process_id}/timeline", response_model=PageResponse[TimelineItemResponse], responses=ERROR_RESPONSES)
+    @app.get("/api/v1/opportunities/{process_id}/timeline", response_model=PageResponse[TimelineItemResponse],
+             dependencies=[Depends(dashboard_reader)], description=DASHBOARD_READ_DESCRIPTION,
+             responses=READ_RESPONSES)
     def timeline(process_id: UUID, profile_id: UUID | None = None, profile_code: str | None = None,
                  page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100)):
         return to_page(queries.timeline(process_id, _scope(profile_id, profile_code), _page(page, page_size)), TimelineItemResponse)
 
-    @app.get("/api/v1/review-queue", response_model=PageResponse[DashboardReviewQueueItemResponse], responses=ERROR_RESPONSES)
+    @app.get("/api/v1/review-queue", response_model=PageResponse[DashboardReviewQueueItemResponse],
+             dependencies=[Depends(dashboard_reader)], description=DASHBOARD_READ_DESCRIPTION,
+             responses=READ_RESPONSES)
     def review_queue(profile_id: UUID | None = None, profile_code: str | None = None,
                      queue: ReviewQueue = ReviewQueue.NEEDS_REVIEW, page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
                      sort: SortField = SortField.LATEST_CAPTURE_AT, direction: SortDirection = SortDirection.DESC):
         dto = queries.review_queue(_scope(profile_id, profile_code), queue, pagination=_page(page, page_size), sort=_sort(sort, direction))
         return to_page(dto, DashboardReviewQueueItemResponse)
 
-    @app.get("/api/v1/collection-rounds", response_model=PageResponse[CollectionRoundListItemResponse], responses=ERROR_RESPONSES)
+    @app.get("/api/v1/collection-rounds", response_model=PageResponse[CollectionRoundListItemResponse],
+             dependencies=[Depends(dashboard_reader)], description=DASHBOARD_READ_DESCRIPTION,
+             responses=READ_RESPONSES)
     def rounds(page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100), source: str | None = None,
                from_datetime: datetime | None = None, to_datetime: datetime | None = None):
         return to_page(queries.collection_rounds(
             _range(from_datetime, to_datetime), _page(page, page_size), _source(source),
         ), CollectionRoundListItemResponse)
 
-    @app.get("/api/v1/collection-rounds/{round_id}", response_model=CollectionRoundDetailResponse, responses=ERROR_RESPONSES)
+    @app.get("/api/v1/collection-rounds/{round_id}", response_model=CollectionRoundDetailResponse,
+             dependencies=[Depends(dashboard_reader)], description=DASHBOARD_READ_DESCRIPTION,
+             responses=READ_RESPONSES)
     def round_detail(round_id: UUID): return to_response(queries.collection_round_detail(round_id), CollectionRoundDetailResponse)
 
     @app.post("/api/v1/reviews", status_code=201, response_model=ReviewCreatedResponse,

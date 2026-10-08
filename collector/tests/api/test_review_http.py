@@ -177,8 +177,22 @@ def test_token_is_not_logged(caplog):
     assert secret not in "\n".join(record.getMessage() for record in caplog.records)
 
 
-def test_existing_read_routes_remain_public():
+def test_health_remains_public():
     assert client(authenticator=Authenticator()).get("/health").status_code == 200
+
+
+def test_dashboard_read_does_not_grant_review_write():
+    response = client(authenticator=Authenticator(frozenset({"dashboard:read"}))).post(
+        "/api/v1/reviews", json=payload(), headers={"Authorization": "Bearer valid-token"}
+    )
+    assert response.status_code == 403
+
+
+def test_both_permissions_preserve_review_write():
+    response = client(authenticator=Authenticator(
+        frozenset({"dashboard:read", "reviews:write"})
+    )).post("/api/v1/reviews", json=payload(), headers={"Authorization": "Bearer valid-token"})
+    assert response.status_code == 201
 
 
 def test_openapi_documents_jwt_permission_and_responses_without_oauth_flow():
