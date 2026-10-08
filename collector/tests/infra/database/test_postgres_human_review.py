@@ -3,9 +3,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from threading import Barrier
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
@@ -19,6 +20,8 @@ from collector.application.human_review import (
     RecordHumanReview, RecordHumanReviewCommand, ReviewerIdentity, ReviewQueue as Q,
     IdempotencyConflictError, StaleOperationalResolutionError,
 )
+from collector.api.app import create_app
+from collector.api.security import AuthenticatedPrincipal
 from collector.infra.database import (
     SqlAlchemyScreeningRepository, SqlAlchemyOperationalResolutionRepository,
     SqlAlchemyDocumentScreeningRepository,
@@ -68,6 +71,39 @@ def next_resolution(operational, resolution, **kwargs):
     result = replace(resolution, **fields)
     operational.persist(result)
     return result
+
+
+class AuthorizedReviewer:
+    def authenticate(self, _token):
+        return AuthenticatedPrincipal(
+            issuer="https://issuer.example",
+            subject="reviewer-123",
+            display_name="Revisor Autorizado",
+            permissions=frozenset({"reviews:write"}),
+        )
+
+
+def review_client(factory):
+    return TestClient(
+        create_app(
+            queries=object(),
+            session_factory=factory,
+            authenticator=AuthorizedReviewer(),
+        )
+    )
+
+
+def review_payload(resolution, **overrides):
+    payload = {
+        "operational_resolution_id": str(resolution.id),
+        "decision": "SELECTED",
+        "reason": "RELEVANT_SCOPE_CONFIRMED",
+        "comment": "Escopo confirmado na revisao.",
+        "idempotency_key": str(uuid4()),
+        "allow_stale": False,
+    }
+    payload.update(overrides)
+    return payload
 
 
 def previous_layers(session):
@@ -258,6 +294,69 @@ def test_concurrent_idempotency(setup, conflict):
     else:
         assert results[0].id == results[1].id
     assert repo.summary().reviews_total == 1
+
+
+def test_authenticated_review_http_persists_auditable_identity_and_is_idempotent(setup):
+    factory, repo, _, resolution = setup
+    client = review_client(factory)
+    payload = review_payload(resolution, idempotency_key="http-postgres-idempotent")
+    headers = {"Authorization": "Bearer test-token"}
+
+    first = client.post("/api/v1/reviews", json=payload, headers=headers)
+    retry = client.post("/api/v1/reviews", json=payload, headers=headers)
+
+    assert first.status_code == 201
+    assert retry.status_code == 201
+    assert retry.json()["review_id"] == first.json()["review_id"]
+    stored = repo.latest_review_for_resolution(resolution.id)
+    assert stored is not None
+    assert stored.id == UUID(first.json()["review_id"])
+    assert stored.reviewer.reviewer_id == "oidc:22:https://issuer.examplereviewer-123"
+    assert stored.reviewer.display_name == "Revisor Autorizado"
+    assert stored.was_stale_at_decision is False
+    assert repo.summary().reviews_total == 1
+
+    conflict = client.post(
+        "/api/v1/reviews",
+        json={**payload, "comment": "Outro conteudo."},
+        headers=headers,
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
+    assert repo.summary().reviews_total == 1
+
+
+def test_authenticated_review_http_handles_missing_and_stale_resolution(setup):
+    factory, repo, operational, resolution = setup
+    client = review_client(factory)
+    headers = {"Authorization": "Bearer test-token"}
+
+    missing = client.post(
+        "/api/v1/reviews",
+        json=review_payload(resolution, operational_resolution_id=str(uuid4())),
+        headers=headers,
+    )
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "OPERATIONAL_RESOLUTION_NOT_FOUND"
+
+    latest = next_resolution(operational, resolution)
+    stale_payload = review_payload(resolution, idempotency_key="http-postgres-stale")
+    blocked = client.post("/api/v1/reviews", json=stale_payload, headers=headers)
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "STALE_OPERATIONAL_RESOLUTION"
+
+    allowed = client.post(
+        "/api/v1/reviews",
+        json={**stale_payload, "allow_stale": True, "idempotency_key": "http-postgres-stale-allowed"},
+        headers=headers,
+    )
+    assert allowed.status_code == 201
+    assert allowed.json()["was_stale_at_decision"] is True
+    assert allowed.json()["latest_resolution_id_at_decision"] == str(latest.id)
+    stored = repo.latest_review_for_resolution(resolution.id)
+    assert stored is not None
+    assert stored.was_stale_at_decision is True
+    assert stored.latest_resolution_id_at_decision == latest.id
 
 
 def test_controlled_3341_demo(migrated_engine, db_session, persist_service, tmp_path):

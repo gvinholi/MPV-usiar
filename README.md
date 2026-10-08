@@ -41,9 +41,11 @@ uvicorn collector.api.app:create_app --factory --reload
 ```
 
 `/health` não acessa o banco; `/ready` verifica a conexão. A documentação está em
-`/docs` e `/openapi.json`. Ainda não há autenticação: não exponha esta API
-publicamente sem proteção de rede/autenticação apropriada. Nenhuma rota POST, PUT,
-PATCH ou DELETE é fornecida.
+`/docs` e `/openapi.json`. As rotas GET permanecem read-only e públicas, sem
+autenticação na aplicação. A API inteira não deve ser exposta publicamente sem uma
+camada adicional de proteção de rede/identidade para essas rotas. A única escrita
+HTTP é `POST /api/v1/reviews`, protegida por Bearer JWT OIDC e pela permissão
+`reviews:write`.
 
 Exemplos de consulta (o perfil deve ser identificado por `profile_id` ou por um
 `profile_code` não ambíguo):
@@ -52,6 +54,51 @@ Exemplos de consulta (o perfil deve ser identificado por `profile_id` ou por um
 GET /api/v1/opportunities?profile_code=USIAR&page=1&page_size=25
 GET /api/v1/opportunities/by-source?source=PNCP&official_id=00509968000148%2F2026%2F3341&profile_code=USIAR
 ```
+
+Para habilitar a rota de revisão, configure os valores aprovados para o provedor
+OIDC compatível:
+
+```text
+OIDC_ISSUER=https://issuer.example
+OIDC_AUDIENCE=mpv-usiar-api
+OIDC_JWKS_URL=https://issuer.example/.well-known/jwks.json
+OIDC_ALGORITHMS=RS256
+OIDC_JWKS_CACHE_SECONDS=300
+```
+
+Sem issuer, audience e JWKS URL, a rota de escrita falha de forma fechada com 503.
+O provedor de produção ainda não foi escolhido; a implantação depende dessa decisão
+e da concessão do scope `reviews:write`. Tokens não devem ser colocados em arquivos
+versionados nem registrados em logs.
+
+`OIDC_JWKS_URL` deve ser uma URL HTTPS válida, sem credenciais embutidas. O conjunto
+JWKS é mantido em cache pelo TTL configurado, entre 1 e 3600 segundos; chaves
+desconhecidas podem provocar atualização do conjunto. A remoção de uma chave não tem efeito instantâneo enquanto
+um conjunto ainda válido estiver em cache, portanto o TTL deve ser compatível com a
+política operacional de rotação e revogação do provedor.
+
+Exemplo de contrato, usando apenas um placeholder de credencial:
+
+```http
+POST /api/v1/reviews HTTP/1.1
+Authorization: Bearer <token-oidc>
+Content-Type: application/json
+
+{
+  "operational_resolution_id": "00000000-0000-0000-0000-000000000000",
+  "decision": "SELECTED",
+  "reason": "RELEVANT_SCOPE_CONFIRMED",
+  "comment": "Escopo confirmado na revisão.",
+  "idempotency_key": "review-request-0001",
+  "allow_stale": false
+}
+```
+
+O reviewer é derivado exclusivamente dos claims verificados `iss` e `sub`; nome e
+permissões enviados no JSON são rejeitados. O campo `name` pode fornecer apenas o
+display name. O endpoint retorna 201 em sucesso; 401/403 para autenticação ou
+autorização, 404 para resolução inexistente, 409 para idempotência/stale e 422 para
+payload inválido.
 
 CORS fica desabilitado por padrão. Para desenvolvimento com um frontend separado,
 defina `API_CORS_ORIGINS` como uma lista de origens explícitas separadas por vírgula.

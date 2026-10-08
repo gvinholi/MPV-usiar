@@ -2,8 +2,8 @@
 from datetime import datetime
 from typing import Generic, TypeVar
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict
-from collector.application.human_review.models import HumanReviewDecision, HumanReviewStatus
+from pydantic import BaseModel, ConfigDict, Field
+from collector.application.human_review.models import HumanReviewDecision, HumanReviewReason, HumanReviewStatus
 
 class HttpModel(BaseModel): model_config = ConfigDict(extra="forbid")
 class HealthResponse(HttpModel): status: str
@@ -41,6 +41,26 @@ class OperationalResolutionResponse(HttpModel):
     resolution_id: UUID; initial_evaluation_id: UUID; document_evaluation_id: UUID | None; state: str; reason: str; rule: str; fingerprint: str; resolved_at: datetime; state_diverged: bool | None; reason_diverged: bool | None; divergence_kind: str | None
 class HumanReviewResponse(HttpModel):
     review_id: UUID; operational_resolution_id: UUID; decision: HumanReviewDecision; reason: str; reviewer_id: str; reviewer_display_name: str | None; comment: str | None; decided_at: datetime; was_stale_at_decision: bool
+class ReviewCreateRequest(HttpModel):
+    operational_resolution_id: UUID
+    decision: HumanReviewDecision
+    reason: HumanReviewReason
+    comment: str | None = Field(default=None, max_length=4000)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    allow_stale: bool = False
+class ReviewCreatedResponse(HttpModel):
+    review_id: UUID
+    process_id: UUID
+    profile_id: UUID
+    operational_resolution_id: UUID
+    decision: HumanReviewDecision
+    reason: HumanReviewReason
+    comment: str | None
+    reviewer_id: str
+    reviewer_display_name: str | None
+    was_stale_at_decision: bool
+    latest_resolution_id_at_decision: UUID
+    decided_at: datetime
 class LatestObservationResponse(HttpModel):
     observation_id: UUID; round_id: UUID; source: str; captured_at: datetime | None; persisted_at: datetime
 class OpportunityCountersResponse(HttpModel): documents: int; artifacts: int; extracted_sources: int; pages: int; pages_with_text: int

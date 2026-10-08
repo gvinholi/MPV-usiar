@@ -135,6 +135,15 @@ def test_inverted_or_naive_range_is_validation(client):
         assert client.get("/api/v1/opportunities", params=params).status_code == 422
 
 
+def test_explicit_source_contract_validation_remains_422(client):
+    by_source = client.get("/api/v1/opportunities/by-source", params={
+        "source":"INVALID", "official_id":" ", "profile_id":str(PROFILE_ID),
+    })
+    rounds = client.get("/api/v1/collection-rounds", params={"source":"INVALID"})
+    assert by_source.status_code == 422
+    assert rounds.status_code == 422
+
+
 @pytest.mark.parametrize(("failure","status","code"), [(OpportunityNotFoundError(),404,"OPPORTUNITY_NOT_FOUND"),
     (ProfileNotFoundError(),404,"PROFILE_NOT_FOUND"), (AmbiguousProfileError(),409,"AMBIGUOUS_PROFILE"),
     (RuntimeError("secret SQL C:/private"),500,"INTERNAL_ERROR")])

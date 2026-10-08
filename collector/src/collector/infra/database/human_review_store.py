@@ -18,6 +18,7 @@ from collector.application.human_review.models import (
     ReviewerIdentity, ReviewQueue, ReviewQueueItem, check_stale, derive_status,
     ALLOWED_REASONS, validate_command, in_queue,
 )
+from collector.application.human_review_errors import OperationalResolutionNotFoundError
 from collector.infra.database.models import Base, OperationalResolutionRow
 from collector.infra.database.resolution_store import _LATEST
 
@@ -101,7 +102,7 @@ class SqlAlchemyHumanReviewRepository:
                 return _retry(existing, command)
             resolution = session.get(R, command.operational_resolution_id)
             if resolution is None:
-                raise ValueError(f"operational resolution not found: {command.operational_resolution_id}")
+                raise OperationalResolutionNotFoundError(str(command.operational_resolution_id))
             latest = session.scalar(select(R).where(
                 R.process_id == resolution.process_id, R.profile_id == resolution.profile_id,
             ).order_by(*_LATEST).limit(1))

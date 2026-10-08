@@ -900,3 +900,67 @@ contrato HTTP.
 Não existem rotas POST, PUT, PATCH ou DELETE. Também não há autenticação; a API não
 deve ser exposta publicamente sem proteção apropriada de rede e identidade. CORS é
 desabilitado por padrão e, quando configurado, aceita somente origens explícitas.
+
+---
+
+## 38. API autenticada de revisão humana
+
+```text
+OIDC Provider → Bearer JWT → JWKS Validation → reviews:write
+                                                    ↓
+POST /api/v1/reviews → RecordHumanReview → PostgreSQL
+```
+
+Esta seção estende a seção 37 e substitui, somente para revisão humana, a restrição
+anterior de API integralmente read-only. A única escrita HTTP deste commit é
+`POST /api/v1/reviews`. As rotas GET continuam públicas e sem autenticação na
+aplicação. A API não pode ser exposta publicamente sem uma camada adicional de
+proteção de rede/identidade que também cubra essas leituras. A rota de escrita reutiliza
+`RecordHumanReview` e `SqlAlchemyHumanReviewRepository`; decisão/motivo,
+idempotência, stale, append-only, auditoria e atomicidade continuam pertencendo
+às camadas existentes. A borda FastAPI não duplica essas regras e não compartilha
+uma `Session` SQLAlchemy global. As rotas GET mantêm a semântica do Commit 17.
+
+**Autenticação.** Bearer JWT é validado com `PyJWT[crypto]` e chave assimétrica
+obtida por JWKS. Issuer, audience, URL JWKS, algoritmos aceitos e tempo de cache
+são configuração de ambiente. A allowlist de algoritmos é definida no servidor;
+algoritmos simétricos e tokens sem assinatura não são aceitos. Assinatura, `iss`,
+`aud`, `exp`, `sub` e `nbf` quando presente são validados. A URL JWKS deve ser HTTPS,
+sem credenciais embutidas, e vem exclusivamente da configuração — headers/claims do
+token não escolhem endpoint. O conjunto JWKS possui cache com TTL entre 1 e 3600
+segundos e permite atualização por `kid` desconhecido. Não existe cache individual de chave sem TTL.
+A remoção/revogação de uma chave não é instantânea enquanto o conjunto atualmente
+armazenado ainda estiver dentro do TTL. Configuração incompleta ou indisponibilidade da
+validação falham de forma fechada. Tokens e headers de autorização não entram nos
+logs nem nas respostas de erro.
+
+**Identidade e autorização.** `AuthenticatedPrincipal` é imutável e contém
+issuer, subject, display name e permissions. O identificador persistido do
+reviewer é uma representação estável, inequívoca e reversível de `iss` + `sub`,
+com separação por tamanho. Se exceder 200 caracteres, a requisição é rejeitada;
+não há truncamento, hash ou colisão silenciosa. Display name vem somente do claim
+`name` válido. Permissões vêm do claim OAuth2 `scope`, separado por espaços, e a
+rota exige `reviews:write`; ausência nega por padrão. Identidade, display name e
+permissões enviados no corpo são campos extras e são rejeitados.
+
+**Contrato HTTP.** O payload aceita somente `operational_resolution_id`,
+`decision`, `reason`, `comment`, `idempotency_key` e `allow_stale`. Decisões
+permitidas continuam `SELECTED`, `PENDING` e `DISCARDED`, com reason code validado
+pelo contrato do Commit 15. Sucesso retorna 201 e a representação auditável da
+review. Credencial ausente/inválida retorna 401 com `WWW-Authenticate: Bearer`;
+permissão insuficiente, 403; resolução inexistente, 404; conflito de idempotência
+ou resolução stale, 409; payload/comando inválido, 422. Falha inesperada retorna
+500 sanitizado. Indisponibilidade da configuração ou JWKS retorna 503 sem abrir a
+rota de escrita.
+
+**Configuração e implantação.** `OIDC_ISSUER`, `OIDC_AUDIENCE` e
+`OIDC_JWKS_URL` são obrigatórios para habilitar a autenticação composta pela
+aplicação; `OIDC_ALGORITHMS` e `OIDC_JWKS_CACHE_SECONDS` controlam allowlist e
+cache. Dependências podem ser injetadas explicitamente em testes sem credenciais
+reais. Nenhum provedor foi escolhido. Produção depende da aprovação do provedor,
+dos valores de issuer/audience/JWKS e da concessão controlada de `reviews:write`,
+além de proteção de rede e transporte TLS. Não há cadastro local, login/senha,
+refresh token, revogação própria, RBAC em banco ou endpoint genérico de escrita.
+
+Sem migration nova: a identidade OIDC derivada usa os campos auditáveis de reviewer
+já existentes em `human_reviews`.
