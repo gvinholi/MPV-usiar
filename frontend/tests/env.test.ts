@@ -15,7 +15,6 @@ describe("server configuration", () => {
     { FASTAPI_BASE_URL: "http://api.test" }, { APP_ORIGIN: "https://app.test?redirect=evil" },
     { OIDC_SCOPES: "openid offline_access" }, { OIDC_SCOPES: "dashboard:read" },
     { API_TIMEOUT_MS: "0" }, { SESSION_IDLE_SECONDS: "200", SESSION_ABSOLUTE_SECONDS: "100" },
-    { API_PROFILE_ID: "invalid" }, { API_PROFILE_ID: "a", API_PROFILE_CODE: "USIAR" },
     { NEXT_PUBLIC_CLIENT_SECRET: "do-not-leak" },
   ])("rejects invalid configuration without echoing values: %j", raw => {
     expect(() => testEnv(raw)).toThrow(ConfigurationError);
@@ -23,6 +22,10 @@ describe("server configuration", () => {
   });
   it("requires HTTPS OIDC even in development", () => {
     expect(() => testEnv({ OIDC_ISSUER: "http://localhost:9000", OIDC_CLIENT_ID: "test", OIDC_CLIENT_AUTH_METHOD: "none" })).toThrow();
+  });
+  it("keeps profile configuration server-side for page-level validation", () => {
+    expect(testEnv({ API_PROFILE_ID: "invalid" }).API_PROFILE_ID).toBe("invalid");
+    expect(testEnv({ API_PROFILE_ID: "a", API_PROFILE_CODE: "USIAR" })).toMatchObject({ API_PROFILE_ID: "a", API_PROFILE_CODE: "USIAR" });
   });
   it("does not silently use memory in production", () => {
     expect(() => new MemorySessionStore(1000, Date.now, "production")).toThrow();

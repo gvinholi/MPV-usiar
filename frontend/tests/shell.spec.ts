@@ -23,8 +23,8 @@ test("OIDC login, responsive navigation and logout keep credentials server-side"
   const leaked: string[] = [];
   page.on("console", msg => { if (/test-only-secret|test-access-marker|access_token|id_token/.test(msg.text())) leaked.push(msg.text()); });
   await login(page);
-  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
-  await expect(page.getByText("Área em preparação")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dashboard operacional", exact: true })).toBeVisible();
+  await expect(page.getByText("Processos na coorte", { exact: true })).toBeVisible();
   const cookies = await context.cookies("http://127.0.0.1:3100");
   const session = cookies.find(c => c.name === "usiar-session");
   expect(session).toMatchObject({ httpOnly: true, sameSite: "Lax", secure: false });
@@ -39,7 +39,7 @@ test("OIDC login, responsive navigation and logout keep credentials server-side"
   for (const title of ["Oportunidades", "Fila de Revisão", "Rodadas de Coleta", "Dashboard"]) {
     if (isMobile) await page.getByRole("button", { name: "Abrir menu" }).click();
     await page.getByRole("link", { name: title, exact: true }).filter({ visible: true }).click();
-    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: title === "Dashboard" ? "Dashboard operacional" : title, exact: true })).toBeVisible();
     if (isMobile) await expect(page.getByRole("dialog")).not.toBeVisible();
   }
   if (isMobile) {
@@ -62,7 +62,7 @@ test("rejects CSRF for logout and login without ending the valid session", async
   expect(response.status()).toBe(403);
   const missing = await page.request.post("/auth/logout", { headers: { Origin: "http://127.0.0.1:3100" }, form: { csrf: "wrong" } });
   expect(missing.status()).toBe(403);
-  await page.goto("/dashboard"); await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
+  await page.goto("/dashboard"); await expect(page.getByRole("heading", { name: "Dashboard operacional", exact: true })).toBeVisible();
   const start = await page.request.post("/auth/login", { headers: { Origin: "https://evil.test" }, form: { csrf } });
   expect(start.status()).toBe(403);
 });

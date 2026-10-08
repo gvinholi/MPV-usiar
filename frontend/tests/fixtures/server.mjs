@@ -22,6 +22,7 @@ const keys = await generateKeyPair("RS256");
 const jwk = { ...await exportJWK(keys.publicKey), kid: "test-key", alg: "RS256", use: "sig" };
 const codes = new Map();
 let permission = "dashboard:read";
+let scenario = "reader";
 const json = (res, value, status = 200) => { res.writeHead(status, { "Content-Type": "application/json" }); res.end(JSON.stringify(value)); };
 const bodyOf = async req => { let body = ""; for await (const chunk of req) body += chunk; return body; };
 const provider = https.createServer({ key: tls.private, cert: tls.cert }, async (req, res) => {
@@ -59,15 +60,42 @@ const provider = https.createServer({ key: tls.private, cert: tls.cert }, async 
 });
 const api = http.createServer(async (req, res) => {
   if (req.url === "/health") return json(res, { status: "ok" });
-  if (req.url === "/scenario" && req.method === "POST") { permission = (await bodyOf(req)) === "writer" ? "reviews:write" : "dashboard:read"; return json(res, {}); }
+  if (req.url === "/scenario" && req.method === "POST") {
+    scenario = await bodyOf(req); permission = scenario === "writer" ? "reviews:write" : "dashboard:read"; return json(res, {});
+  }
+  const authenticate = async () => {
+    if (req.headers.cookie) throw new Error("browser cookie forwarded");
+    const token = req.headers.authorization?.replace(/^Bearer /, "");
+    const { payload } = await jwtVerify(token, keys.publicKey, { issuer, audience: "test-api" });
+    if (!payload.scope.split(" ").includes("dashboard:read")) return false;
+    return true;
+  };
   if (req.url === "/ready") {
     try {
-      if (req.headers.cookie) return json(res, {}, 400);
-      const token = req.headers.authorization?.replace(/^Bearer /, "");
-      const { payload } = await jwtVerify(token, keys.publicKey, { issuer, audience: "test-api" });
-      if (!payload.scope.split(" ").includes("dashboard:read")) return json(res, { error: { code: "FORBIDDEN" } }, 403);
+      if (!await authenticate()) return json(res, { error: { code: "FORBIDDEN" } }, 403);
       return json(res, { status: "ready" });
     } catch { return json(res, { error: { code: "INVALID_CREDENTIALS" } }, 401); }
+  }
+  const url = new URL(req.url, "http://127.0.0.1:8100");
+  if (url.pathname === "/api/v1/dashboard/summary") {
+    try {
+      if (!await authenticate()) return json(res, { error: { code: "FORBIDDEN" } }, 403);
+    } catch { return json(res, { error: { code: "INVALID_CREDENTIALS" } }, 401); }
+    const statuses = { "error-404": 404, "error-409": 409, "error-422": 422, "error-500": 500, "error-503": 503 };
+    if (scenario in statuses) return json(res, { error: { code: scenario === "error-409" ? "AMBIGUOUS_PROFILE" : "TEST_ERROR", message: "test-access-marker internal" } }, statuses[scenario]);
+    if (url.searchParams.get("profile_code") !== "USIAR" || url.searchParams.has("profile_id")) return json(res, { error: { code: "VALIDATION_ERROR" } }, 422);
+    const from = url.searchParams.get("from_datetime"); const to = url.searchParams.get("to_datetime");
+    const empty = scenario === "empty";
+    const zeroSnapshot = { processes_total: 0, current_candidate: 0, current_pending: 0, current_discarded: 0, needs_review: 0, selected: 0, human_pending: 0, human_discarded: 0, stale_reviews: 0, documents_total: 0, documents_with_artifact: 0, documents_with_text: 0 };
+    const zeroActivity = { records_collected: 0, processes_first_seen: 0, documents_discovered: 0, document_screenings_total: 0, operational_resolutions_total: 0, human_reviews_total: 0, rounds_total: 0, rounds_success: 0, rounds_partial: 0, rounds_failed: 0 };
+    const zeroFunnel = { records_collected: 0, unique_processes: 0, initial_candidate: 0, initial_pending: 0, initial_discarded: 0, document_evaluated: 0, operational_candidate: 0, operational_pending: 0, operational_discarded: 0, selected: 0, human_pending: 0, human_discarded: 0 };
+    return json(res, {
+      profile_id: "c7d2d8d1-6dc4-4d2e-9aa5-ce4359ff9ad4", period: { from_datetime: from, to_datetime: to },
+      current_snapshot: empty ? zeroSnapshot : { ...zeroSnapshot, processes_total: 1, current_candidate: 1, needs_review: 1, documents_total: 2, documents_with_artifact: 1, documents_with_text: 1 },
+      period_activity: empty ? zeroActivity : { ...zeroActivity, records_collected: 7, processes_first_seen: 1, documents_discovered: 2, document_screenings_total: 1, operational_resolutions_total: 1, rounds_total: 2, rounds_success: 1, rounds_partial: 1 },
+      funnel: empty ? zeroFunnel : { ...zeroFunnel, records_collected: 7, unique_processes: 1, initial_candidate: 1, document_evaluated: 1, operational_candidate: 1 },
+      source_coverage: empty ? [] : [{ source: "FONTE-NOVA", rounds: 2, successful_rounds: 1, partial_rounds: 1, failed_rounds: 0, records_collected: 7, unique_processes: 1 }],
+    });
   }
   return json(res, {}, 404);
 });

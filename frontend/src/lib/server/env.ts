@@ -46,8 +46,8 @@ export function readEnvironment(raw: Record<string, string | undefined> = proces
     if (origin.pathname !== "/" || api.pathname !== "/") throw new ConfigurationError();
     if (production && (!raw.APP_ORIGIN || !raw.FASTAPI_BASE_URL)) throw new ConfigurationError();
     if (value.SESSION_IDLE_SECONDS > value.SESSION_ABSOLUTE_SECONDS) throw new ConfigurationError();
-    if (value.API_PROFILE_ID && value.API_PROFILE_CODE) throw new ConfigurationError();
-    if (value.API_PROFILE_ID) z.uuid().parse(value.API_PROFILE_ID);
+    // Profile selection is validated at each profile-scoped page before any API call.
+    // Keeping it separate lets authentication stay available to report a safe configuration state.
     const configured = Boolean(value.OIDC_ISSUER || value.OIDC_CLIENT_ID || value.OIDC_CLIENT_AUTH_METHOD || value.OIDC_CLIENT_SECRET);
     if (configured) {
       if (!value.OIDC_ISSUER || !value.OIDC_CLIENT_ID || !value.OIDC_CLIENT_AUTH_METHOD) throw new ConfigurationError();

@@ -15,7 +15,7 @@ export default defineConfig({
       env: { APP_ORIGIN: "http://127.0.0.1:3100", FASTAPI_BASE_URL: "http://127.0.0.1:8100", OIDC_ISSUER: "https://127.0.0.1:4443",
         OIDC_CLIENT_ID: "test-client", OIDC_CLIENT_SECRET: "test-only-secret", OIDC_CLIENT_AUTH_METHOD: "client_secret_basic",
         OIDC_SCOPES: "openid dashboard:read", OIDC_ID_TOKEN_ALG: "RS256", OIDC_RESOURCE: "", OIDC_AUDIENCE: "",
-        API_PROFILE_ID: "", API_PROFILE_CODE: "", NODE_EXTRA_CA_CERTS: resolve(".test-tls/ca.pem"), NEXT_TELEMETRY_DISABLED: "1" },
+        API_PROFILE_ID: "", API_PROFILE_CODE: "USIAR", NODE_EXTRA_CA_CERTS: resolve(".test-tls/ca.pem"), NEXT_TELEMETRY_DISABLED: "1" },
     },
     { command: "npm run start -- --port 3200", url: "http://127.0.0.1:3200/login", reuseExistingServer: false, timeout: 60000,
       env: { NODE_ENV: "production", APP_ORIGIN: "https://app.test", FASTAPI_BASE_URL: "https://api.test",

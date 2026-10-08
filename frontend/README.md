@@ -77,6 +77,40 @@ python frontend/scripts/generate-contracts.py --check
 python frontend/scripts/generate-contracts.py
 ```
 
+## Dashboard operacional
+
+`/dashboard` consome exclusivamente `GET /api/v1/dashboard/summary` em um Server
+Component. A página lê a sessão opaca, obtém o Bearer no `SessionStore` e chama a
+operação nomeada `getDashboardSummary`; não consulta `/ready` antes, não oferece proxy
+ao navegador e não envia tokens, credenciais ou configuração de perfil para componentes
+cliente. A resposta permanece `no-store` e é validada pelo contrato Zod gerado.
+
+O perfil vem somente de `API_PROFILE_ID` ou `API_PROFILE_CODE`. Exatamente um valor
+válido é exigido antes da consulta. Parâmetros `profile_id` e `profile_code` na URL são
+rejeitados. Código ambíguo apresenta uma orientação para configurar o UUID, sem tentar
+escolher uma versão. A API retorna apenas o UUID resolvido; nome e versão não são
+inventados pela interface.
+
+O filtro aceita `from_datetime` e `to_datetime` opcionais em `datetime-local`, converte
+o instante local para ISO 8601 UTC e o preserva na URL. O intervalo é fechado no início
+e aberto no fim. A página rejeita valores repetidos, chaves desconhecidas, timestamps
+sem fuso e intervalo invertido antes da chamada à API. Sem limites, todo o histórico é
+consultado; não existe período padrão implícito.
+
+O dashboard distingue três bases:
+
+- **estado atual da coorte:** estado vigente dos processos cujo primeiro registro está
+  no período selecionado;
+- **atividade do perfil:** avaliações documentais, resoluções operacionais e revisões
+  humanas ocorridas no período para o perfil consultado;
+- **coleta geral:** rodadas, registros, processos e documentos descobertos, além da
+  cobertura por fonte, sem restrição ao perfil.
+
+O funil exibe somente contagens absolutas fornecidas pela API. A interface não calcula
+taxas, perdas, tendências, percentuais ou rodadas em andamento. Fontes são tratadas
+como strings abertas. Resumo realmente zerado tem estado vazio próprio; falhas 401,
+403, 404, 409, 422, 500, 503, rede e timeout continuam sendo erros, nunca listas vazias.
+
 ## Verificações
 
 ```powershell

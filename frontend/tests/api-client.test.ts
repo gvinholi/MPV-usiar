@@ -32,8 +32,8 @@ describe("server-only HTTP client", () => {
   it.each([401, 403, 404, 409, 422, 500, 503])("normalizes %i without leaking upstream messages", async status => {
     const f = await apiFixture(); const transport = vi.fn(async () => Response.json({ error: { code: "SECRET", message: "test-only-access-token internal SQL password" } }, { status }));
     const api = createApiClient(f.env, f.store, f.id, transport);
-    await expect(api.ready()).rejects.toMatchObject({ status });
-    try { await api.ready(); } catch (error) {
+    await expect(api.getDashboardSummary({ profile_code: "USIAR" })).rejects.toMatchObject({ status });
+    try { await api.getDashboardSummary({ profile_code: "USIAR" }); } catch (error) {
       expect(error).toBeInstanceOf(ApiError); expect(String(error)).not.toMatch(/access-token|SQL|password/);
     }
     if (status === 401) expect(await f.store.readSession(f.id)).toBeUndefined();
@@ -41,7 +41,7 @@ describe("server-only HTTP client", () => {
   });
   it.each(["AMBIGUOUS_PROFILE", "IDEMPOTENCY_CONFLICT", "STALE_OPERATIONAL_RESOLUTION"])("preserves known conflict code %s", async code => {
     const f = await apiFixture(); const api = createApiClient(f.env, f.store, f.id, async () => Response.json({ error: { code } }, { status: 409 }));
-    await expect(api.ready()).rejects.toMatchObject({ code });
+    await expect(api.getDashboardSummary({ profile_code: "USIAR" })).rejects.toMatchObject({ code });
   });
   it("requires a valid session before network access", async () => {
     const f = await apiFixture(); const transport = vi.fn(); await f.store.deleteSession(f.id);
@@ -52,7 +52,7 @@ describe("server-only HTTP client", () => {
     const transport: typeof fetch = (_url, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new Error("internal-secret")));
     });
-    await expect(createApiClient(f.env, f.store, f.id, transport).ready()).rejects.toMatchObject({ code: "TIMEOUT", status: 504 });
+    await expect(createApiClient(f.env, f.store, f.id, transport).getDashboardSummary({ profile_code: "USIAR" })).rejects.toMatchObject({ code: "TIMEOUT", status: 504 });
   });
   it("sanitizes network failures and incompatible JSON", async () => {
     const f = await apiFixture();

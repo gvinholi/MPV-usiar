@@ -1121,3 +1121,48 @@ permanece dependente de configuração aprovada. Instruções em `frontend/READM
 
 Sem alteração de FastAPI, coletor, domínio, banco, migrations ou regras USIAR.
 Sem implementação de funcionalidades do Commit 21, refresh token ou implantação.
+
+---
+
+## 41. Dashboard operacional
+
+O Commit 21 substitui o estado preparatório de `/dashboard` pela primeira consulta
+operacional do frontend. A página é um Server Component dinâmico e usa exclusivamente
+`GET /api/v1/dashboard/summary`, por meio da operação nomeada já existente no cliente
+BFF. O fluxo lê a sessão opaca pelo cookie HttpOnly, recupera o access token no
+`SessionStore`, chama a origem fixa da FastAPI com `cache: no-store` e valida a resposta
+com o schema Zod gerado. Não há chamada preliminar a `/ready`, proxy público ou token
+serializado para o navegador.
+
+`API_PROFILE_ID` e `API_PROFILE_CODE` são configuração exclusiva do servidor. A página
+exige exatamente um deles antes de consultar a API; ausência, UUID inválido ou os dois
+simultaneamente produzem um estado de configuração. A URL não aceita perfil. Quando o
+código identifica várias versões, o `409 AMBIGUOUS_PROFILE` orienta o operador a usar
+o UUID, sem seleção implícita. A resposta identifica o perfil apenas por UUID; nome e
+versão não fazem parte do contrato.
+
+O navegador controla somente `from_datetime` e `to_datetime`. O componente interativo
+converte `datetime-local` para instantes ISO 8601 UTC e navega por GET. O Server Component
+aceita limites abertos, preserva o intervalo `[início, fim)`, rejeita datas sem fuso,
+ordem inválida, parâmetros repetidos e qualquer chave fora da allowlist. Ausência de
+limites significa todo o histórico, sem janela padrão criada pelo frontend.
+
+**Semântica visual.** O estado atual representa a classificação vigente da coorte de
+processos selecionada por `first_seen_at` no período. Avaliações documentais, resoluções
+operacionais e revisões humanas são atividades específicas do perfil. Rodadas, registros
+coletados, processos e documentos descobertos e cobertura por fonte são métricas gerais
+do coletor e são rotulados dessa forma; não são apresentados como exclusivos da USIAR.
+Fontes permanecem strings abertas.
+
+O funil agrupa os doze valores absolutos retornados pela API, mas não presume que seus
+estágios tenham a mesma base. Nenhuma taxa, perda, tendência, percentual ou quantidade
+de rodadas em andamento é derivada. `rounds_total` pode incluir estados não detalhados
+pelos três contadores terminais. Um resumo com todas as contagens zeradas e sem fontes
+é estado vazio real. Erros de autenticação, autorização, perfil, validação, serviço,
+rede e timeout mantêm estados de erro distintos e sanitizados.
+
+Os componentes de apresentação são server-side. Somente o filtro temporal usa Client
+Component para conversão de fuso e navegação. A suíte cobre contrato, filtros, perfil,
+vazio, erros, responsividade, semântica básica e ausência de tokens no navegador. Não
+foram adicionadas dependências, endpoints, tabelas de oportunidades, revisão humana,
+exportação, migrations ou mudanças no coletor/FastAPI.
