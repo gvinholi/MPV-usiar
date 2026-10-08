@@ -870,3 +870,33 @@ Eventos de decisões respeitam o perfil; coleta/documentos são compartilhados. 
 **Performance e limites.** Lista/fila usam window functions, subqueries/aggregações e projeção de apenas 300 caracteres da descrição; nenhuma consulta individual por processo. Medição: 4 statements (SET READ ONLY + perfil + count + página), tanto com 7 como com 30 processos; 3 são SELECTs. Documentos buscam extrações e members em lote para a página. Detalhe usa queries especializadas por seção, sem consulta por página/evidência. Contagens, detalhes e summaries compartilham snapshot consistente; teste concorrente confirma que uma inserção durante a leitura só aparece no próximo snapshot. Offset e ILIKE são adequados ao piloto; não há promessa de latência em milhões de linhas, FTS ou índices novos.
 
 Sem dependências novas, schema/migrations intactos. Sem API HTTP, frontend, auth/RBAC, scheduler/GCP/Cloud Run, RHS novo, Google Sheets, IA/OpenAI/OCR/embeddings, Redis/Elasticsearch/materialized views ou export CSV/XLSX.
+---
+
+## 37. API HTTP read-only
+
+```text
+PostgreSQL
+    ↓
+SqlAlchemyReadModelStore
+    ↓
+DashboardQueries
+    ↓
+FastAPI
+    ↓
+Future Dashboard
+```
+
+A API FastAPI é uma borda síncrona e versionada em `/api/v1`. Endpoints de banco
+usam funções `def`, permitindo ao framework executá-los fora do event loop. Cada
+operação continua abrindo sua própria sessão no `SqlAlchemyReadModelStore`, em
+transação `READ ONLY / REPEATABLE READ`; nenhuma `Session` é global ou compartilhada.
+
+A camada HTTP depende apenas de `DashboardQueries` e DTOs de aplicação. Ela não
+consulta models SQLAlchemy diretamente, não escolhe versões `latest`, não calcula
+reviews stale, não reconstrói o funil, não abre artifacts/storage e não baixa ou
+extrai documentos. Schemas Pydantic e mappings explícitos formam a barreira do
+contrato HTTP.
+
+Não existem rotas POST, PUT, PATCH ou DELETE. Também não há autenticação; a API não
+deve ser exposta publicamente sem proteção apropriada de rede e identidade. CORS é
+desabilitado por padrão e, quando configurado, aceita somente origens explícitas.

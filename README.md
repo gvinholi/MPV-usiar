@@ -30,6 +30,33 @@ collector/              Coletor Python (domínio, aplicação, infra)
 
 O dashboard Next.js e a infraestrutura Google Cloud entram em commits posteriores.
 
+## API HTTP
+
+A API read-only é criada com FastAPI e expõe os recursos de consulta sob `/api/v1`.
+Configure `DATABASE_URL` para execução real e inicie localmente com:
+
+```powershell
+cd collector
+uvicorn collector.api.app:create_app --factory --reload
+```
+
+`/health` não acessa o banco; `/ready` verifica a conexão. A documentação está em
+`/docs` e `/openapi.json`. Ainda não há autenticação: não exponha esta API
+publicamente sem proteção de rede/autenticação apropriada. Nenhuma rota POST, PUT,
+PATCH ou DELETE é fornecida.
+
+Exemplos de consulta (o perfil deve ser identificado por `profile_id` ou por um
+`profile_code` não ambíguo):
+
+```text
+GET /api/v1/opportunities?profile_code=USIAR&page=1&page_size=25
+GET /api/v1/opportunities/by-source?source=PNCP&official_id=00509968000148%2F2026%2F3341&profile_code=USIAR
+```
+
+CORS fica desabilitado por padrão. Para desenvolvimento com um frontend separado,
+defina `API_CORS_ORIGINS` como uma lista de origens explícitas separadas por vírgula.
+Wildcard não é aceito e credenciais CORS não são habilitadas.
+
 ## Coletor
 
 Requer Python 3.13+.

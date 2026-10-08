@@ -13,6 +13,8 @@ dependencies = [
     "alembic>=1.14",
     "psycopg[binary]>=3.2",
     "pypdf>=5.4,<7",
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30,<1",
 ]
 
 [project.optional-dependencies]
