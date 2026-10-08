@@ -1013,3 +1013,111 @@ os definidos na seção 38.
 
 Sem migration, endpoint de escrita adicional, usuário/senha local ou mudança nas
 regras de coleta, triagem, revisão humana, idempotência, stale e auditoria.
+
+---
+
+## 40. Fundação frontend e BFF
+
+O Commit 20 adiciona `frontend/` ao mesmo monorepo: Next.js 16 App Router, Node.js
+24.x, React 19, TypeScript strict, Tailwind CSS 4 e componentes shadcn/ui. A interface
+usa Server Components por padrão, com Client Components restritos à interação do
+layout. Sidebar responsiva, header, navegação, loading, erro e vazio são reutilizáveis.
+Dashboard, Oportunidades, Fila de Revisão e Rodadas de Coleta têm páginas iniciais,
+sem métricas, oportunidades fictícias, gráficos, tabelas completas ou decisões.
+
+```text
+Navegador → cookie opaco HttpOnly → Next.js BFF → Bearer → FastAPI → PostgreSQL
+                                      ↕
+                                Provedor OIDC
+```
+
+O frontend não tem ORM nem acesso direto ao PostgreSQL. Autorização efetiva continua
+na FastAPI: `dashboard:read` para leitura e `reviews:write` para escrita, independentes.
+Cada entrada de página protegida verifica sessão e `/ready` na API, além da proteção
+do layout. A indisponibilidade não vira lista vazia. Não há consulta operacional
+pública, proxy HTTP genérico nem endpoint BFF de escrita de revisão.
+
+**OIDC.** `openid-client` 6 implementa discovery, Authorization Code com PKCE S256,
+state e nonce aleatórios e validação de ID token com assinatura/JWKS habilitada
+explicitamente. Issuer, client ID, autenticação do cliente e eventual audience/resource
+são configuração exclusiva do servidor. Não há provedor ou credenciais reais presumidos.
+ID token autentica no BFF; somente access token vai à FastAPI. Provedor deve anunciar
+S256, usar endpoints HTTPS e retornar validade positiva do access token. Claims não
+validados não concedem acesso. Redirecionamentos de chamadas OIDC são bloqueados.
+
+**Transações e sessões.** Pré-login e transação OIDC expiram em cinco minutos. A
+transação de callback é consumida atomicamente antes da troca do código, inclusive
+quando o fluxo falha. A sessão usa identificador aleatório de 256 bits em cookie,
+com chave hash no store. Access token fica somente no servidor; ID/refresh tokens
+não são persistidos. Não há refresh; expiração requer novo login. Padrões: inatividade
+de 30 minutos, máximo absoluto de oito horas e limite adicional da validade do token.
+Nova autenticação substitui a sessão anterior. Logout POST invalida o store e apaga
+cookie; não promete logout global do provedor ou revogação instantânea do access token.
+
+Cookie HttpOnly, SameSite=Lax, Path=/ e sem Domain. Secure em produção/HTTPS;
+prefixo `__Host-` em produção. HTTP de desenvolvimento usa nome sem esse prefixo.
+Nenhum access token vai para JavaScript, HTML, RSC props, localStorage ou sessionStorage.
+O token CSRF não é credencial OIDC e pode estar no formulário associado à sessão.
+
+**CSRF e origem.** Login POST e logout exigem Origin exato, Fetch Metadata compatível,
+tipo de conteúdo explícito e token sincronizador de sessão/pré-login, com comparação
+em tempo constante. Callback usa state/nonce/PKCE e cookie de vínculo. URLs de retorno
+são fixas e construídas de `APP_ORIGIN`, nunca de Host arbitrário ou retorno fornecido
+pelo navegador. Corpo CSRF é limitado a 2 KiB. Logs de requisição do Next dev são
+desabilitados para não expor código/state do callback; proxy de produção deve aplicar
+a mesma política de sigilo.
+
+**Limite de produção.** `SessionStore` possui implementação somente em memória para
+desenvolvimento/testes em processo único. Reinício encerra sessões. Não é fallback
+de produção: requisições falham fechadas enquanto não houver adaptador compartilhado
+aprovado, mesmo com OIDC configurado. Build pode ser produzido, mas isso não habilita
+autenticação de produção. A aprovação de store, TTL/consumo atômico, proteção em repouso,
+TLS, segredos, política de SSO/revogação e controles operacionais precede implantação.
+
+**Cliente HTTP.** Módulos `server-only` separam dados de interface. Operações de leitura
+são nomeadas, com paths fixos, UUIDs e filtros validados e Bearer obtido exclusivamente
+da sessão vigente. Base URL é configuração server-side; redirects e cookies do browser
+são proibidos. Timeout padrão de 10 segundos, limite de resposta de 4 MiB, `no-store`
+e schemas Zod evitam consumo/cache acidental de dados incompatíveis. Não há retry de
+escrita. Erros 401/403/404/409/422/500/503, rede e timeout são normalizados; mensagens
+internas e tokens não são expostos. 401 invalida sessão, 403 mantém acesso negado sem
+loop. Request ID é criado pelo BFF e enviado à API para correlação.
+
+**Contratos.** Schemas TypeScript/Zod são derivados do AST dos schemas HTTP Python,
+sem importar ou alterar coletor/API. Script de geração e verificação de divergência
+fica no frontend. Respostas preservam UUID, timestamps com fuso, strings decimais,
+nulos e paginação. Queries preservam exatamente um perfil onde requerido, intervalo
+`[início, fim)`, allowlist de sort/direction e limites da API. Campo de filtro interno
+não exposto por HTTP não vira parâmetro no BFF. Regras de domínio permanecem na API.
+
+**Exceção temporária de segurança do tooling.** Em 2026-10-08 foi aceita, somente
+para desenvolvimento, a exposição ao advisory GHSA-vfj7-8cjw-p6xm /
+CVE-2026-93687 em `braces@3.0.3`. A cadeia identificada é
+`eslint-config-next → @next/eslint-plugin-next → fast-glob → micromatch → braces`;
+todos esses pacotes estão na árvore de desenvolvimento e `npm audit --omit=dev`
+não encontra a dependência. Na data da decisão não existe versão corrigida publicada
+de `braces`. O impacto potencial é stack overflow e negação de serviço ao processar
+padrões glob especialmente construídos.
+
+Essa aceitação não autoriza padrões glob vindos de fontes não confiáveis nas
+ferramentas afetadas, nem a execução do tooling de desenvolvimento como serviço
+exposto publicamente. O `npm audit` completo continua obrigatório e seu alerta deve
+ser reportado como exceção, nunca ocultado ou contado como verificação aprovada. A
+cadeia deve ser reavaliada assim que houver correção upstream. Esta decisão não é uma
+aprovação geral de segurança para produção.
+
+ESLint 9 permanece temporariamente com a configuração oficial do Next.js 16. A
+migração para ESLint 10 aguarda suporte completo do Next e dos plugins instalados;
+nenhuma regra de segurança ou qualidade foi desabilitada. O fim de suporte do ESLint
+9 é risco residual conhecido e também deve ser reavaliado com a atualização upstream.
+
+**Validação.** Vitest cobre configuração, protocolo OIDC com RSA/JWKS de teste,
+nonce/state/PKCE/replay, cookies, expiração/invalidação, CSRF e cliente HTTP. Playwright
+exercita fluxo real do BFF contra provedor HTTPS/API isolados de teste, desktop/mobile,
+navegação, proteção de rotas, logout, falta de permissão e não exposição de tokens.
+Fixtures não são importadas pelo aplicativo; não existe modo de bypass no runtime.
+Lint, TypeScript e build são verificações separadas. Validação com provedor real
+permanece dependente de configuração aprovada. Instruções em `frontend/README.md`.
+
+Sem alteração de FastAPI, coletor, domínio, banco, migrations ou regras USIAR.
+Sem implementação de funcionalidades do Commit 21, refresh token ou implantação.

@@ -28,7 +28,24 @@ docs/ARCHITECTURE.md    Contrato arquitetural
 collector/              Coletor Python (domínio, aplicação, infra)
 ```
 
-O dashboard Next.js e a infraestrutura Google Cloud entram em commits posteriores.
+O frontend Next.js está em `frontend/`, com instruções em [frontend/README.md](frontend/README.md).
+A fundação do Commit 20 inclui layout responsivo, BFF OIDC, sessões server-side locais,
+cliente HTTP tipado e testes. Sem provedor configurado, o acesso permanece bloqueado.
+Não há dados fictícios nem escrita de revisões no frontend. Produção depende de um
+SessionStore compartilhado aprovado; a implementação em memória não é habilitada em produção.
+A infraestrutura Google Cloud entra em commits posteriores.
+
+Execução local do frontend (Node.js 24.x e npm):
+
+```powershell
+cd frontend
+npm.cmd ci
+Copy-Item .env.example .env.local
+npm.cmd run dev
+```
+
+Abra `http://127.0.0.1:3000`. Configuração OIDC, limitações e verificações estão no README
+do frontend e na [seção 40 do contrato arquitetural](docs/ARCHITECTURE.md#40-fundação-frontend-e-bff).
 
 ## API HTTP
 
