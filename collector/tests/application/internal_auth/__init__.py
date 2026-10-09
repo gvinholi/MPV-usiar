@@ -1,0 +1,1 @@
+"""Internal authentication application tests."""

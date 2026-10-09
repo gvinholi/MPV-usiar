@@ -11,12 +11,15 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
+    LargeBinary,
     MetaData,
     Numeric,
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -604,4 +607,133 @@ class OperationalResolutionRow(Base):
 
     process: Mapped[ProcessRow] = relationship()
     profile: Mapped[ScreeningProfileRow] = relationship()
+
+
+class AuthUserRow(Base):
+    __tablename__ = "auth_users"
+    __table_args__ = (
+        UniqueConstraint("normalized_email", name="uq_auth_users_normalized_email"),
+        CheckConstraint("length(email) BETWEEN 3 AND 320", name="email_length"),
+        CheckConstraint("length(normalized_email) BETWEEN 3 AND 320", name="normalized_email_length"),
+        CheckConstraint("normalized_email = lower(normalized_email)", name="normalized_email_lower"),
+        CheckConstraint("password_hash LIKE '$argon2id$%'", name="argon2id"),
+        CheckConstraint("password_version >= 1", name="password_version"),
+        CheckConstraint("display_name IS NULL OR (display_name ~ '[^[:space:]]' AND length(display_name) <= 200)", name="display_name"),
+        CheckConstraint("updated_at >= created_at", name="timestamp_order"),
+        CheckConstraint("(active AND disabled_at IS NULL) OR (NOT active AND disabled_at IS NOT NULL)", name="active_state"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_email: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(Text)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    password_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuthPermissionRow(Base):
+    __tablename__ = "auth_permissions"
+    __table_args__ = (
+        CheckConstraint(
+            "code ~ '^[a-z][a-z0-9_-]{0,31}:[a-z][a-z0-9_-]{0,31}$'",
+            name="code",
+        ),
+        CheckConstraint("description ~ '[^[:space:]]' AND length(description) <= 200", name="description"),
+    )
+
+    code: Mapped[str] = mapped_column(Text, primary_key=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AuthUserPermissionRow(Base):
+    __tablename__ = "auth_user_permissions"
+
+    user_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("auth_users.id"), primary_key=True)
+    permission_code: Mapped[str] = mapped_column(Text, ForeignKey("auth_permissions.code"), primary_key=True, index=True)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    granted_by: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("auth_users.id"))
+
+
+class AuthSessionRow(Base):
+    __tablename__ = "auth_sessions"
+    __table_args__ = (
+        UniqueConstraint("verifier_digest", name="uq_auth_sessions_verifier_digest"),
+        CheckConstraint("octet_length(verifier_digest) = 32", name="verifier_digest"),
+        CheckConstraint("octet_length(csrf_digest) = 32", name="csrf_digest"),
+        CheckConstraint("password_version >= 1", name="password_version"),
+        CheckConstraint("last_seen_at >= created_at", name="last_seen"),
+        CheckConstraint("last_seen_at < idle_expires_at", name="last_seen_expiration"),
+        CheckConstraint("idle_expires_at > created_at AND idle_expires_at <= absolute_expires_at", name="idle_expiration"),
+        CheckConstraint("absolute_expires_at > created_at", name="absolute_expiration"),
+        CheckConstraint("(revoked_at IS NULL AND revoke_reason IS NULL) OR (revoked_at IS NOT NULL AND revoke_reason ~ '[^[:space:]]' AND length(revoke_reason) <= 100)", name="revocation"),
+        Index(
+            "ix_auth_sessions_expiration",
+            "absolute_expires_at",
+            "idle_expires_at",
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    verifier_digest: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    csrf_digest: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    user_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("auth_users.id"), nullable=False, index=True)
+    password_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    idle_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    absolute_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoke_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class AuthLoginAttemptRow(Base):
+    __tablename__ = "auth_login_attempts"
+    __table_args__ = (
+        CheckConstraint("octet_length(key_digest) = 32", name="key_digest"),
+        CheckConstraint("failure_count >= 0", name="failure_count"),
+        CheckConstraint("last_failure_at >= window_started_at", name="failure_order"),
+        CheckConstraint("updated_at >= created_at", name="update_order"),
+        CheckConstraint("blocked_until IS NULL OR blocked_until > last_failure_at", name="block_order"),
+        Index(
+            "ix_auth_login_attempts_blocked_until",
+            "blocked_until",
+            postgresql_where=text("blocked_until IS NOT NULL"),
+        ),
+    )
+
+    key_digest: Mapped[bytes] = mapped_column(LargeBinary, primary_key=True)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_failure_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AuthAuditEventRow(Base):
+    __tablename__ = "auth_audit_events"
+    __table_args__ = (
+        CheckConstraint("event_type ~ '^[A-Z][A-Z0-9_]{0,63}$'", name="type"),
+        CheckConstraint("outcome IN ('SUCCESS','FAILURE')", name="outcome"),
+        CheckConstraint("request_id IS NULL OR request_id ~ '^[A-Za-z0-9._:-]{1,128}$'", name="request_id"),
+        CheckConstraint("created_at >= occurred_at", name="timestamp_order"),
+        Index("ix_auth_audit_events_subject_time", "subject_user_id", "occurred_at"),
+        Index("ix_auth_audit_events_type_time", "event_type", "occurred_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    subject_user_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("auth_users.id"))
+    actor_user_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("auth_users.id"))
+    request_id: Mapped[str | None] = mapped_column(Text)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

@@ -1166,3 +1166,84 @@ Component para conversão de fuso e navegação. A suíte cobre contrato, filtro
 vazio, erros, responsividade, semântica básica e ausência de tokens no navegador. Não
 foram adicionadas dependências, endpoints, tabelas de oportunidades, revisão humana,
 exportação, migrations ou mudanças no coletor/FastAPI.
+
+---
+
+## 42. Fundação da autenticação interna
+
+O Commit 22 acrescenta persistência e serviços de aplicação para uma identidade
+Admin/Dev própria, sem substituir nem enfraquecer o OIDC existente. Ele não expõe
+login HTTP, não altera o `SessionStore` do Next.js e não concede acesso às rotas da
+FastAPI. Até uma etapa posterior integrar autenticação e autorização internas, o
+login web continua dependendo do fluxo OIDC descrito na seção 40.
+
+```text
+CLI bootstrap -> serviço de aplicação -> repositório SQLAlchemy -> PostgreSQL
+
+Futuro login HTTP -> autenticação + rate limit -> sessão opaca/JWT interno -> FastAPI
+```
+
+### Persistência
+
+A migration `0009_internal_auth` cria seis tabelas:
+
+* `auth_users`: e-mail original/normalizado, hash Argon2id, versão da senha, estado e
+  timestamps com fuso;
+* `auth_permissions` e `auth_user_permissions`: catálogo e concessões explícitas;
+* `auth_sessions`: identificador público, digests SHA-256 do verificador e de CSRF,
+  versão da senha, limites de inatividade/absoluto e revogação;
+* `auth_login_attempts`: chave já digerida, janela, contador e bloqueio temporário;
+* `auth_audit_events`: tipo, resultado, atores opcionais, correlação e timestamps,
+  sem corpo de requisição ou material de autenticação.
+
+Chaves estrangeiras, unicidade do e-mail normalizado, tamanho dos digests, ordem dos
+timestamps, coerência de ativação/revogação e formatos de auditoria são protegidos
+também pelo PostgreSQL. Índices atendem busca de usuário, sessões por usuário e por
+expiração, bloqueios ativos e auditoria por sujeito/tipo e tempo. O downgrade remove
+somente essas tabelas na ordem das dependências.
+
+A migration insere exclusivamente as permissões `dashboard:read` e `reviews:write`,
+iguais aos scopes HTTP já exigidos pela FastAPI. A futura emissão de credenciais
+internas deverá derivá-los das concessões persistidas; a FastAPI continuará
+autorizando somente claims validados. Não há usuário, senha, sessão ou tentativa
+criada automaticamente.
+
+### Senhas e bootstrap
+
+`argon2-cffi` produz hashes Argon2id com salt aleatório, memória de 19 MiB
+(`19456 KiB`), duas iterações, paralelismo 1, hash de 32 bytes e salt de 16 bytes.
+A política aceita Unicode e espaços significativos, rejeita valores compostos apenas
+por espaços e exige de 15 a 128 caracteres. Verificação incorreta ou hash inválido
+falha sem propagar detalhes; hashes com parâmetros antigos são marcados para rehash.
+Senha em texto puro existe apenas durante a chamada e nunca integra modelo persistido,
+evento de auditoria, argumento CLI ou saída.
+
+Com `DATABASE_URL` explicitamente configurada e migrations em `head`, o primeiro
+administrador é criado por:
+
+```powershell
+cd collector
+python -m collector.cli.auth bootstrap-admin
+```
+
+O comando pede e-mail, senha via `getpass` e confirmação. Um advisory lock transacional
+serializa execuções concorrentes; se qualquer usuário já existir, o bootstrap é
+recusado. Usuário ativo, concessões `dashboard:read`/`reviews:write` e evento
+`BOOTSTRAP_ADMIN/SUCCESS` são gravados na mesma transação. Falha em qualquer parte
+reverte tudo. Em sucesso, a saída contém somente confirmação e UUID. Não existem
+credenciais padrão nem opção de senha por argumento.
+
+### Limites e próxima etapa
+
+As interfaces de aplicação separam usuários, sessões, tentativas e auditoria do
+adaptador SQLAlchemy. O modelo de sessão está pronto para armazenar apenas um
+identificador público e digests; nenhuma rotina deste commit emite cookie, JWT,
+sessão ou token. Tentativas de login também são somente persistidas: política de
+rate limiting, bloqueio operacional e proteção contra enumeração pertencem ao
+Commit 23, junto do endpoint/formulário de login e emissão segura de credencial para
+a FastAPI a partir das permissões internas.
+
+Produção ainda requer definição de chaves de assinatura/rotação, store usado pelo
+BFF, invalidação coordenada, limites operacionais, alertas de auditoria, TLS e gestão
+de segredos. O OIDC deve permanecer disponível como estratégia futura até uma decisão
+específica de migração; esta fundação não é bypass para as verificações atuais.

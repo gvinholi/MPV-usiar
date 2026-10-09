@@ -7,12 +7,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from alembic import command
 from collector.application import PersistCollection
 from collector.infra.database import SqlAlchemyCollectionRepository
 
@@ -31,7 +32,7 @@ def postgres_url() -> str:
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         pytest.skip(f"PostgreSQL indisponível: {exc}")
     return url
 
@@ -51,7 +52,9 @@ def db_session(migrated_engine: Engine) -> Iterator[Session]:
     with migrated_engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE collection_rounds, processes, screening_profiles, artifacts "
+                "TRUNCATE auth_login_attempts, auth_audit_events, auth_sessions, "
+                "auth_user_permissions, auth_users, collection_rounds, processes, "
+                "screening_profiles, artifacts "
                 "RESTART IDENTITY CASCADE"
             )
         )

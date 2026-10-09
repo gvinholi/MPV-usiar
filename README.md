@@ -26,6 +26,7 @@ O piloto **não** automatiza:
 ```text
 docs/ARCHITECTURE.md    Contrato arquitetural
 collector/              Coletor Python (domínio, aplicação, infra)
+frontend/               Dashboard Next.js e BFF
 ```
 
 O frontend Next.js está em `frontend/`, com instruções em [frontend/README.md](frontend/README.md).
@@ -154,6 +155,29 @@ docker compose down
 
 `DATABASE_URL` é a única variável de conexão. A aplicação lê essa variável num único ponto de infra.
 
+### Bootstrap da autenticação interna
+
+A fundação da autenticação própria mantém usuários, permissões, sessões opacas,
+tentativas de login e auditoria no PostgreSQL. A migration `0009_internal_auth`
+insere somente o catálogo `dashboard:read`/`reviews:write`; não cria credenciais. Depois de
+aplicar as migrations, crie a primeira e única conta Admin/Dev de forma interativa:
+
+```powershell
+cd collector
+$env:DATABASE_URL = "postgresql+psycopg://usiar:usiar@localhost:5433/usiar"
+python -m collector.cli.auth bootstrap-admin
+```
+
+O comando lê a senha com `getpass`, exige ao menos 15 caracteres, concede as duas
+permissões em uma transação e recusa execução quando já existe qualquer usuário.
+Não passe senha na linha de comando e não registre sua saída em logs que contenham
+entrada interativa. Não existe senha padrão ou usuário criado pela migration.
+
+Esta etapa não oferece login HTTP, formulário no frontend, token JWT interno ou
+integração das permissões internas com os scopes atuais da FastAPI. O fluxo OIDC
+existente permanece ativo e é o único fluxo de login web até a próxima etapa.
+Detalhes estão na [seção 42 da arquitetura](docs/ARCHITECTURE.md#42-fundação-da-autenticação-interna).
+
 Coleta, persistência, triagem, catálogo e aquisição de artefatos são passos separados. `CatalogProcessDocuments.catalog()` consulta metadados; `AcquireDocumentArtifact.acquire(document)` baixa um documento já catalogado, sob demanda.
 
 ## Catálogo de documentos PNCP
@@ -190,7 +214,9 @@ Reviews são append-only; mudar de ideia cria nova linha. `OTHER` exige comentá
 
 As consultas `review_status_for_process(process_id, profile_id)`, `latest_review_for_resolution`, `list_reviews_for_process`, `list_queue` e `summary` preparam a leitura do dashboard. A fila distingue `NEEDS_REVIEW`, `SELECTED`, `HUMAN_DISCARDED`, `HUMAN_PENDING` e `STALE_REVIEW`. Descartes automáticos sem review ficam fora da fila principal, mas podem ser incluídos explicitamente. Nenhum estado humano é gravado em `processes` ou em métricas de coleta.
 
-Migration: `alembic upgrade head` aplica até `0008_human_reviews`, inclusive em banco vazio. Detalhes de concorrência, status e auditoria estão em [ARCHITECTURE.md](docs/ARCHITECTURE.md#35-revisão-humana-auditável).
+A migration `0008_human_reviews` introduz essa camada; `alembic upgrade head` aplica
+também as migrations posteriores, inclusive em banco vazio. Detalhes de concorrência,
+status e auditoria estão em [ARCHITECTURE.md](docs/ARCHITECTURE.md#35-revisão-humana-auditável).
 
 ## Read model / dashboard queries
 
