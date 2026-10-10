@@ -2,7 +2,7 @@
 import https from "node:https";
 import http from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { generate } from "selfsigned";
 import { exportJWK, generateKeyPair, SignJWT, jwtVerify } from "jose";
 
@@ -21,6 +21,7 @@ const issuer = "https://127.0.0.1:4443";
 const keys = await generateKeyPair("RS256");
 const jwk = { ...await exportJWK(keys.publicKey), kid: "test-key", alg: "RS256", use: "sig" };
 const codes = new Map();
+const internalSessions = new Map();
 let permission = "dashboard:read";
 let scenario = "reader";
 const json = (res, value, status = 200) => { res.writeHead(status, { "Content-Type": "application/json" }); res.end(JSON.stringify(value)); };
@@ -63,9 +64,38 @@ const api = http.createServer(async (req, res) => {
   if (req.url === "/scenario" && req.method === "POST") {
     scenario = await bodyOf(req); permission = scenario === "writer" ? "reviews:write" : "dashboard:read"; return json(res, {});
   }
+  if (req.url === "/api/v1/auth/session" && req.method === "POST") {
+    if (scenario === "auth-invalid") return json(res, { error: { code: "INVALID_CREDENTIALS" } }, 401);
+    if (scenario === "auth-rate") { res.setHeader("Retry-After", "30"); return json(res, { error: { code: "AUTHENTICATION_RATE_LIMITED" } }, 429); }
+    if (scenario === "auth-unavailable") return json(res, { error: { code: "AUTHENTICATION_UNAVAILABLE" } }, 503);
+    let body;
+    try { body = JSON.parse(await bodyOf(req)); } catch { return json(res, { error: { code: "VALIDATION_ERROR" } }, 422); }
+    if (Object.keys(body).sort().join(",") !== "email,password" || body.email !== "admin@example.com" || body.password !== "senha interna válida 🔐") {
+      return json(res, { error: { code: "INVALID_CREDENTIALS" } }, 401);
+    }
+    const token = `usiar_s1.${randomUUID()}.${randomBytes(32).toString("base64url")}`;
+    const csrf = randomBytes(32).toString("base64url");
+    internalSessions.set(token, { csrf, permission, active: true });
+    const now = Date.now();
+    return json(res, { token_type: "Bearer", session_token: token, csrf_token: csrf,
+      idle_expires_at: new Date(now + 30 * 60_000).toISOString(), absolute_expires_at: new Date(now + 8 * 60 * 60_000).toISOString() }, 201);
+  }
+  if (req.url === "/api/v1/auth/session" && req.method === "DELETE") {
+    if (scenario === "logout-unavailable") return json(res, { error: { code: "AUTHENTICATION_UNAVAILABLE" } }, 503);
+    const token = req.headers.authorization?.replace(/^Bearer /, "");
+    const session = internalSessions.get(token);
+    if (!session) return json(res, { error: { code: "INVALID_CREDENTIALS" } }, 401);
+    if (req.headers["x-csrf-token"] !== session.csrf) return json(res, { error: { code: "FORBIDDEN" } }, 403);
+    session.active = false; res.writeHead(204, { "Cache-Control": "no-store" }); return res.end();
+  }
   const authenticate = async () => {
     if (req.headers.cookie) throw new Error("browser cookie forwarded");
     const token = req.headers.authorization?.replace(/^Bearer /, "");
+    if (token?.startsWith("usiar_s1.")) {
+      const session = internalSessions.get(token);
+      if (!session?.active) throw new Error("invalid internal session");
+      return session.permission.split(" ").includes("dashboard:read");
+    }
     const { payload } = await jwtVerify(token, keys.publicKey, { issuer, audience: "test-api" });
     if (!payload.scope.split(" ").includes("dashboard:read")) return false;
     return true;
@@ -101,5 +131,9 @@ const api = http.createServer(async (req, res) => {
 });
 provider.listen(4443, "127.0.0.1");
 api.listen(8100, "127.0.0.1");
-const shutdown = () => { provider.close(); api.close(); };
+const shutdown = () => {
+  provider.close(); api.close();
+  provider.closeAllConnections(); api.closeAllConnections();
+  process.exit(0);
+};
 process.on("SIGTERM", shutdown); process.on("SIGINT", shutdown);

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ErrorResponseSchema,
+  InternalLoginRequestSchema,
+  InternalSessionResponseSchema,
   OpportunityListItemResponseSchema,
   ReviewCreateRequestSchema,
   pageSchema,
@@ -83,5 +85,16 @@ describe("generated FastAPI contracts", () => {
   it("preserves Field string constraints", () => {
     expect(ReviewCreateRequestSchema.safeParse({ ...review, idempotency_key: "" }).success).toBe(false);
     expect(ReviewCreateRequestSchema.safeParse({ ...review, comment: "x".repeat(4001) }).success).toBe(false);
+  });
+
+  it("generates strict internal authentication contracts with Unicode code-point limits", () => {
+    const password = "🔐".repeat(15);
+    expect(InternalLoginRequestSchema.safeParse({ email: "admin@example.com", password }).success).toBe(true);
+    expect(InternalLoginRequestSchema.safeParse({ email: "admin@example.com", password, role: "admin" }).success).toBe(false);
+    expect(InternalLoginRequestSchema.safeParse({ email: "admin@example.com", password: "short" }).success).toBe(false);
+    expect(InternalSessionResponseSchema.safeParse({
+      token_type: "Bearer", session_token: "opaque", csrf_token: "csrf",
+      idle_expires_at: "2026-10-10T12:00:00Z", absolute_expires_at: "2026-10-10T13:00:00Z",
+    }).success).toBe(true);
   });
 });

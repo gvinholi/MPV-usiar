@@ -18,7 +18,7 @@ const page = { items: [item], pagination: { page: 1, page_size: 25, total_items:
 describe("server-only HTTP client", () => {
   it("sends bearer exclusively to configured API, preserves decimals/date/null and encodes filters", async () => {
     const f = await apiFixture(); const transport = vi.fn(async () => Response.json(page));
-    const api = createApiClient(f.env, f.store, f.id, transport);
+    const api = createApiClient(f.env, f.credential, transport);
     const result = await api.listOpportunities({ profile_code: "USIAR", search: "a&url=https://evil.test", has_text: false, uf: "sp" });
     expect(result.items[0]?.estimated_value).toBe(item.estimated_value);
     expect(result.items[0]?.publication_at).toBe(item.publication_at); expect(result.items[0]?.human_decision).toBeNull();
@@ -31,7 +31,7 @@ describe("server-only HTTP client", () => {
   });
   it.each([401, 403, 404, 409, 422, 500, 503])("normalizes %i without leaking upstream messages", async status => {
     const f = await apiFixture(); const transport = vi.fn(async () => Response.json({ error: { code: "SECRET", message: "test-only-access-token internal SQL password" } }, { status }));
-    const api = createApiClient(f.env, f.store, f.id, transport);
+    const api = createApiClient(f.env, f.credential, transport);
     await expect(api.getDashboardSummary({ profile_code: "USIAR" })).rejects.toMatchObject({ status });
     try { await api.getDashboardSummary({ profile_code: "USIAR" }); } catch (error) {
       expect(error).toBeInstanceOf(ApiError); expect(String(error)).not.toMatch(/access-token|SQL|password/);
@@ -40,39 +40,39 @@ describe("server-only HTTP client", () => {
     else expect(await f.store.readSession(f.id)).toBeDefined();
   });
   it.each(["AMBIGUOUS_PROFILE", "IDEMPOTENCY_CONFLICT", "STALE_OPERATIONAL_RESOLUTION"])("preserves known conflict code %s", async code => {
-    const f = await apiFixture(); const api = createApiClient(f.env, f.store, f.id, async () => Response.json({ error: { code } }, { status: 409 }));
+    const f = await apiFixture(); const api = createApiClient(f.env, f.credential, async () => Response.json({ error: { code } }, { status: 409 }));
     await expect(api.getDashboardSummary({ profile_code: "USIAR" })).rejects.toMatchObject({ code });
   });
   it("requires a valid session before network access", async () => {
     const f = await apiFixture(); const transport = vi.fn(); await f.store.deleteSession(f.id);
-    await expect(createApiClient(f.env, f.store, f.id, transport).ready()).rejects.toMatchObject({ status: 401 }); expect(transport).not.toHaveBeenCalled();
+    await expect(createApiClient(f.env, f.credential, transport).ready()).rejects.toMatchObject({ status: 401 }); expect(transport).not.toHaveBeenCalled();
   });
   it("times out without leaking transport exceptions", async () => {
     const f = await apiFixture(); f.env.API_TIMEOUT_MS = 10;
     const transport: typeof fetch = (_url, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new Error("internal-secret")));
     });
-    await expect(createApiClient(f.env, f.store, f.id, transport).getDashboardSummary({ profile_code: "USIAR" })).rejects.toMatchObject({ code: "TIMEOUT", status: 504 });
+    await expect(createApiClient(f.env, f.credential, transport).getDashboardSummary({ profile_code: "USIAR" })).rejects.toMatchObject({ code: "TIMEOUT", status: 504 });
   });
   it("sanitizes network failures and incompatible JSON", async () => {
     const f = await apiFixture();
-    await expect(createApiClient(f.env, f.store, f.id, async () => { throw new Error("token-secret"); }).ready()).rejects.toMatchObject({ code: "NETWORK_ERROR" });
-    await expect(createApiClient(f.env, f.store, f.id, async () => Response.json({ token: "secret" })).ready()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    await expect(createApiClient(f.env, f.credential, async () => { throw new Error("token-secret"); }).ready()).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+    await expect(createApiClient(f.env, f.credential, async () => Response.json({ token: "secret" })).ready()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
   it("rejects redirects without following them", async () => {
     const f = await apiFixture(); const transport = vi.fn(async () => new Response(null, { status: 302, headers: { Location: "https://evil.test" } }));
-    await expect(createApiClient(f.env, f.store, f.id, transport).ready()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    await expect(createApiClient(f.env, f.credential, transport).ready()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
     expect(transport).toHaveBeenCalledTimes(1);
   });
   it("validates ids and forbids arbitrary query keys before sending requests", async () => {
-    const f = await apiFixture(); const transport = vi.fn(); const api = createApiClient(f.env, f.store, f.id, transport);
+    const f = await apiFixture(); const transport = vi.fn(); const api = createApiClient(f.env, f.credential, transport);
     expect(() => api.getCollectionRound("//evil.test")).toThrow();
     expect(() => api.listOpportunities({ profile_code: "USIAR", url: "https://evil.test" } as never)).toThrow();
     expect(transport).not.toHaveBeenCalled();
   });
   it("covers every named read resource without exposing a generic request method", async () => {
     const f = await apiFixture(); const transport = vi.fn(async () => Response.json({ error: {} }, { status: 404 }));
-    const api = createApiClient(f.env, f.store, f.id, transport); const profile = { profile_code: "USIAR" };
+    const api = createApiClient(f.env, f.credential, transport); const profile = { profile_code: "USIAR" };
     const operations = [
       () => api.getDashboardSummary(profile), () => api.getOpportunity(id, profile),
       () => api.getOpportunityBySource("PNCP", "123/2026/1", profile), () => api.listDocuments(id),

@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:ui": "playwright test"
+    "test:ui": "node tests/fixtures/run-playwright.mjs",
+    "test:ui:internal": "node tests/fixtures/run-internal-playwright.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.2.0",

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MemorySessionStore } from "../src/lib/server/auth/session-store";
 import { cookieSettings, createAuthService } from "../src/lib/server/auth/session";
 import { verifyCsrf } from "../src/lib/server/auth/csrf";
-import { testEnv } from "./helpers";
+import { oidcEnv, testEnv } from "./helpers";
 
 describe("sessions and login transactions", () => {
   it("expires on inactivity and absolute/token deadline", async () => {
@@ -36,7 +36,7 @@ describe("sessions and login transactions", () => {
     expect(prod.name).toBe("__Host-usiar-session"); expect(prod.secure).toBe(true); expect(prod).not.toHaveProperty("domain");
   });
   it("prelogin transactions are short-lived and reveal only CSRF", async () => {
-    const env = testEnv(); const store = new MemorySessionStore(1000, () => 0, "test");
+    const env = oidcEnv(); const store = new MemorySessionStore(1000, () => 0, "test");
     const auth = createAuthService(env, store, undefined, () => 0);
     const login = await auth.prepareLogin();
     expect(await store.readTransaction(login.id)).toEqual({ csrf: login.csrf, expiresAt: 300000 });

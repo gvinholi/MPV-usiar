@@ -2,11 +2,14 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Environment } from "../env";
-import type { SessionStore } from "../auth/session-store";
 import * as c from "./contracts";
 import { ApiError, httpError } from "./errors";
 
 type Query = Record<string, string | number | boolean | undefined>;
+export type BearerCredential = {
+  read(): Promise<string | undefined>;
+  invalidate(): Promise<void>;
+};
 function validate<T extends z.ZodType>(schema: T, value: unknown): z.output<T> {
   const result = schema.safeParse(value);
   if (!result.success) throw new ApiError("VALIDATION_ERROR", 422);
@@ -29,10 +32,10 @@ async function boundedJson(response: Response) {
 }
 
 /** Only named read operations are exposed. Callers cannot choose a target or headers. */
-export function createApiClient(env: Environment, store: SessionStore, sessionId: string, transport: typeof fetch = fetch) {
+export function createApiClient(env: Environment, credential: BearerCredential, transport: typeof fetch = fetch) {
   async function get<T extends z.ZodType>(path: string, schema: T, query: Query = {}): Promise<z.output<T>> {
-    const session = await store.readSession(sessionId);
-    if (!session) throw new ApiError("UNAUTHENTICATED", 401);
+    const accessToken = await credential.read();
+    if (!accessToken) throw new ApiError("UNAUTHENTICATED", 401);
     const url = new URL(path, env.FASTAPI_BASE_URL);
     if (url.origin !== env.FASTAPI_BASE_URL) throw new ApiError("INVALID_RESPONSE", 502);
     for (const [name, value] of Object.entries(query)) if (value !== undefined) url.searchParams.set(name, String(value));
@@ -41,9 +44,9 @@ export function createApiClient(env: Environment, store: SessionStore, sessionId
     const requestId = randomUUID();
     try {
       const response = await transport(url, { method: "GET", redirect: "error", cache: "no-store", credentials: "omit",
-        headers: { Authorization: `Bearer ${session.accessToken}`, Accept: "application/json", "X-Request-ID": requestId }, signal: controller.signal });
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json", "X-Request-ID": requestId }, signal: controller.signal });
       if (!response.ok) {
-        if (response.status === 401) await store.deleteSession(sessionId);
+        if (response.status === 401) await credential.invalidate();
         // Only conflict codes are inspected; no upstream messages/headers are forwarded.
         const body = response.status === 409 ? await boundedJson(response).catch(() => undefined) : undefined;
         if (response.status !== 409) await response.body?.cancel();

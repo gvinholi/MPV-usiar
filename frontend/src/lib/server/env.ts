@@ -4,6 +4,8 @@ import { z } from "zod";
 const optionalText = z.preprocess(v => v === "" ? undefined : v, z.string().trim().min(1).optional());
 const configSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  AUTH_MODE: z.enum(["internal", "oidc"]),
+  AUTH_COOKIE_KEY: optionalText,
   APP_ORIGIN: z.string().default("http://127.0.0.1:3000"),
   FASTAPI_BASE_URL: z.string().default("http://127.0.0.1:8000"),
   API_TIMEOUT_MS: z.coerce.number().int().min(100).max(30000).default(10000),
@@ -23,6 +25,13 @@ const configSchema = z.object({
 
 export class ConfigurationError extends Error {
   constructor() { super("Configuração do servidor indisponível ou inválida."); }
+}
+
+function decodeCookieKey(value: string | undefined) {
+  if (!value || !/^[A-Za-z0-9_-]{43}$/.test(value)) throw new ConfigurationError();
+  const decoded = Buffer.from(value, "base64url");
+  if (decoded.length !== 32 || decoded.toString("base64url") !== value) throw new ConfigurationError();
+  return decoded;
 }
 
 function checkedUrl(value: string, production: boolean, oidc = false): URL {
@@ -48,17 +57,19 @@ export function readEnvironment(raw: Record<string, string | undefined> = proces
     if (value.SESSION_IDLE_SECONDS > value.SESSION_ABSOLUTE_SECONDS) throw new ConfigurationError();
     // Profile selection is validated at each profile-scoped page before any API call.
     // Keeping it separate lets authentication stay available to report a safe configuration state.
-    const configured = Boolean(value.OIDC_ISSUER || value.OIDC_CLIENT_ID || value.OIDC_CLIENT_AUTH_METHOD || value.OIDC_CLIENT_SECRET);
-    if (configured) {
+    let authCookieKey: Buffer | undefined;
+    if (value.AUTH_MODE === "internal") {
+      authCookieKey = decodeCookieKey(value.AUTH_COOKIE_KEY);
+    } else {
       if (!value.OIDC_ISSUER || !value.OIDC_CLIENT_ID || !value.OIDC_CLIENT_AUTH_METHOD) throw new ConfigurationError();
       checkedUrl(value.OIDC_ISSUER, production, true);
       if (!["client_secret_basic", "client_secret_post", "none"].includes(value.OIDC_CLIENT_AUTH_METHOD)) throw new ConfigurationError();
       if ((value.OIDC_CLIENT_AUTH_METHOD === "none") === Boolean(value.OIDC_CLIENT_SECRET)) throw new ConfigurationError();
-    } else if (value.OIDC_RESOURCE || value.OIDC_AUDIENCE) throw new ConfigurationError();
-    const scopes = value.OIDC_SCOPES.split(/\s+/).filter(Boolean);
-    if (!scopes.includes("openid") || scopes.includes("offline_access") || scopes.some(s => !/^[\x21\x23-\x5B\x5D-\x7E]+$/.test(s))) throw new ConfigurationError();
-    if (value.OIDC_RESOURCE) checkedUrl(value.OIDC_RESOURCE, production, true);
-    return { ...value, APP_ORIGIN: origin.origin, FASTAPI_BASE_URL: api.origin, configured, production };
+      const scopes = value.OIDC_SCOPES.split(/\s+/).filter(Boolean);
+      if (!scopes.includes("openid") || scopes.includes("offline_access") || scopes.some(s => !/^[\x21\x23-\x5B\x5D-\x7E]+$/.test(s))) throw new ConfigurationError();
+      if (value.OIDC_RESOURCE) checkedUrl(value.OIDC_RESOURCE, production, true);
+    }
+    return { ...value, APP_ORIGIN: origin.origin, FASTAPI_BASE_URL: api.origin, configured: true, production, authCookieKey };
   } catch { throw new ConfigurationError(); }
 }
 export type Environment = ReturnType<typeof readEnvironment>;

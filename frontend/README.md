@@ -1,4 +1,4 @@
-# Frontend USIAR — fundação do Commit 20
+# Frontend USIAR
 
 Next.js 16 App Router, React 19, TypeScript strict, Tailwind CSS 4 e componentes shadcn/ui sobre Radix. O servidor Next.js é o BFF. Nenhum ORM, conexão PostgreSQL, coletor ou regra USIAR foi adicionado ao frontend.
 
@@ -17,7 +17,7 @@ npm.cmd run dev
 
 Abra **http://127.0.0.1:3000**. Use esse host de forma consistente; `localhost` é outra origem para cookies/CSRF. No Windows, `npm.cmd` evita dependência da política de execução de scripts PowerShell. Se acabou de instalar Node, abra um novo terminal para atualizar o PATH. Em outros sistemas, use `npm`.
 
-Sem provedor OIDC configurado, `/login` informa autenticação indisponível e todas as páginas operacionais permanecem protegidas. Não existe conta local, login fictício, token colado no navegador ou modo de bypass. Para visualizar o layout autenticado é necessário OIDC válido; a suíte de interface utiliza infraestrutura isolada exclusivamente de testes.
+`AUTH_MODE` seleciona explicitamente `internal` ou `oidc`. No modo interno, crie a conta Admin/Dev pelo bootstrap interativo da raiz; não existe conta automática, senha padrão, login fictício ou bypass. No modo OIDC, configure um provedor válido. Configuração ausente ou incompatível mantém todas as páginas operacionais protegidas.
 
 Inicie a API em outro terminal, conforme o README da raiz:
 
@@ -26,7 +26,39 @@ cd collector
 uvicorn collector.api.app:create_app --factory --reload
 ```
 
-A API deve estar configurada com banco e OIDC próprios. Seu access token precisa ser JWT aceito pela API, com issuer/audience/algoritmo corretos e claim `scope` contendo `dashboard:read`. O BFF chama `/ready` em cada entrada de página para confirmar autorização na FastAPI. `reviews:write` sozinho não concede leitura. O frontend não precisa de CORS da API.
+A API e o frontend devem usar o mesmo `AUTH_MODE`. Em `internal`, a conta e as permissões vêm do PostgreSQL. Em `oidc`, o access token precisa ser JWT aceito pela API, com issuer/audience/algoritmo corretos e `scope` contendo `dashboard:read`. O dashboard usa sua consulta real sem chamada redundante a `/ready`; páginas ainda em preparação usam `/ready`. `reviews:write` sozinho não concede leitura. O frontend não precisa de CORS da API.
+
+Para o primeiro acesso interno, aplique as migrations e execute uma vez o bootstrap interativo, que lê a senha com `getpass`:
+
+```powershell
+docker compose up -d
+cd collector
+$env:DATABASE_URL = "postgresql+psycopg://usiar:usiar@localhost:5433/usiar"
+alembic upgrade head
+python -m collector.cli.auth bootstrap-admin
+```
+
+Inicie FastAPI e Next.js em terminais separados, ambos com `AUTH_MODE=internal`. Gere chaves somente em memória e nunca inclua seus valores em comandos versionados ou logs:
+
+```powershell
+$bytes = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$env:INTERNAL_AUTH_RATE_LIMIT_KEY = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
+$env:AUTH_MODE = "internal"
+uvicorn collector.api.app:create_app --factory --reload --host 127.0.0.1 --port 8000
+```
+
+```powershell
+cd frontend
+$bytes = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$env:AUTH_COOKIE_KEY = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
+$env:AUTH_MODE = "internal"
+$env:APP_ORIGIN = "http://127.0.0.1:3000"
+$env:FASTAPI_BASE_URL = "http://127.0.0.1:8000"
+$env:API_PROFILE_CODE = "USIAR"
+npm.cmd run dev
+```
 
 ## Configuração
 
@@ -34,6 +66,8 @@ Todas as variáveis abaixo são exclusivas do servidor. Não há contrato `NEXT_
 
 | Variável | Uso |
 | --- | --- |
+| `AUTH_MODE` | Obrigatória; exatamente `internal` ou `oidc`, sem fallback |
+| `AUTH_COOKIE_KEY` | Em `internal`, chave AES-256-GCM: 32 bytes aleatórios em base64url canônico |
 | `APP_ORIGIN` | Origem canônica do frontend; sem caminho, query ou credenciais |
 | `FASTAPI_BASE_URL` | Origem da API; caminhos `/api/v1/...` são fixos |
 | `API_TIMEOUT_MS` | 100–30000 ms; padrão 10000 |
@@ -52,6 +86,16 @@ Issuer/client ID/método/segredo reais não são fornecidos no repositório. Con
 
 ## Autenticação, sessão e CSRF
 
+No modo `internal`, `GET /login` prepara automaticamente um CSRF de pré-login. O formulário envia e-mail e senha somente ao `POST /auth/login` do BFF. O BFF valida origem, Fetch Metadata, tipo e tamanho do corpo, campos exatos e CSRF; então chama `POST /api/v1/auth/session` server-side. A resposta da FastAPI é validada e guardada em envelope AES-256-GCM no cookie `usiar-internal-session`. O envelope contém somente versão, modo, token opaco, CSRF da API, CSRF independente do navegador e expiração absoluta. IV de 96 bits é novo a cada cifragem e a tag GCM é verificada antes do uso.
+
+O cookie interno é HttpOnly, SameSite=Lax, Path=/, sem Domain e Secure em HTTPS/produção; em produção recebe prefixo `__Host-`. Token e CSRF da FastAPI nunca aparecem em HTML, URL, JavaScript, Web Storage ou resposta do BFF. O PostgreSQL permanece a autoridade: inatividade, expiração absoluta, revogação, usuário, versão da senha e permissões são revalidados pela FastAPI. O Next.js não cria sessão interna paralela em memória.
+
+`AUTH_COOKIE_KEY` deve permanecer secreta e estável entre reinicializações e réplicas. Trocar a chave encerra localmente todos os cookies internos existentes. Use um gerenciador de segredos em produção e não reutilize a chave entre ambientes.
+
+`POST /auth/logout` valida o CSRF do navegador e chama `DELETE /api/v1/auth/session` com Bearer e CSRF da API somente no canal Next.js→FastAPI. Em 204 ou 401, limpa o cookie. Se revogação falhar por 403, 500, 503, timeout ou rede, mantém a sessão local e retorna erro sanitizado para permitir nova tentativa. `GET /auth/logout` não existe.
+
+No modo `oidc`, o fluxo existente permanece:
+
 `GET /auth/login` cria uma transação de pré-login e redireciona ao formulário. `POST /auth/login` valida Origin, Fetch Metadata e token CSRF, consome essa transação e cria state/nonce/verifier exclusivos por tentativa. O callback consome a transação antes da troca do código, valida state/nonce/PKCE e assinatura do ID token via JWKS (`enableNonRepudiationChecks`). Transações expiram em cinco minutos. Falhas não preservam uma transação reutilizável.
 
 O cookie contém apenas um identificador aleatório de 256 bits; no store sua chave é SHA-256. Access token fica exclusivamente no servidor. ID token e refresh token não são persistidos. O cookie é HttpOnly, SameSite=Lax, Path=/, sem Domain; Secure em HTTPS/produção e nome `__Host-usiar-session` em produção. Em HTTP local usa `usiar-session`.
@@ -64,11 +108,11 @@ Cada acesso verifica expiração absoluta, limite do token e inatividade. Nova a
 
 `lib/server/api/client.ts` expõe apenas operações GET nomeadas para summary, oportunidades, detalhe, lookup por fonte, documentos, evidências, timeline, fila e rodadas. Não há rota pública BFF de consulta, proxy genérico ou escrita de reviews. O layout não consulta listas nem exibe métricas fictícias.
 
-O cliente obtém Bearer do store, valida query/UUID, restringe o destino à origem configurada, proíbe redirects, omite cookies, aplica timeout e `no-store`, limita respostas a 4 MiB e valida JSON por schemas Zod. Erros 401/403/404/409/422/500/503, timeout, rede e contrato inválido viram mensagens locais controladas. 401 invalida sessão; 403 não inicia loop de login. Apenas códigos conhecidos de conflito são preservados; mensagens internas não são repassadas. `X-Request-ID` é gerado no BFF para correlação com os logs da API.
+O cliente obtém Bearer da credencial server-only selecionada, valida query/UUID, restringe o destino à origem configurada, proíbe redirects, omite cookies, aplica timeout e `no-store`, limita respostas a 4 MiB e valida JSON por schemas Zod. Erros 401/403/404/409/422/500/503, timeout, rede e contrato inválido viram mensagens locais controladas. 401 invalida a sessão OIDC ou faz o fluxo interno voltar ao login; 403 não inicia loop. Apenas códigos conhecidos de conflito são preservados; mensagens internas não são repassadas. `X-Request-ID` é gerado no BFF para correlação com os logs da API.
 
 UUIDs e timestamps permanecem strings; datas incluem offset. Valores monetários permanecem strings decimais. Nulos não viram zeros. Paginação mantém o envelope e limites existentes. Intervalos são fechados no início/abertos no fim; ordenação é allowlist, filtros desconhecidos são rejeitados e `include_operational_discarded` não é aceito como parâmetro HTTP.
 
-Os schemas HTTP de resposta são gerados lendo AST Python, sem importar o coletor, conectar banco ou iniciar FastAPI. O script falha se encontrar anotações que não conhece. A fonte de verdade continua sendo a API; constraints adicionais de comandos de revisão permanecem na FastAPI, e o cliente não oferece escrita.
+Os schemas HTTP são gerados de `schemas.py` e `auth_schemas.py` lendo AST Python, sem importar o coletor, conectar banco ou iniciar FastAPI. `StrictStr`, limites por pontos de código Unicode, campos obrigatórios, datetimes e `extra="forbid"` são preservados. O script falha se encontrar anotações que não conhece. A fonte de verdade continua sendo a API; constraints adicionais de comandos de revisão permanecem na FastAPI, e o cliente não oferece escrita operacional.
 
 ```powershell
 # A partir da raiz, usando o Python existente:
@@ -80,7 +124,7 @@ python frontend/scripts/generate-contracts.py
 ## Dashboard operacional
 
 `/dashboard` consome exclusivamente `GET /api/v1/dashboard/summary` em um Server
-Component. A página lê a sessão opaca, obtém o Bearer no `SessionStore` e chama a
+Component. A página lê a sessão selecionada, obtém o Bearer somente no servidor e chama a
 operação nomeada `getDashboardSummary`; não consulta `/ready` antes, não oferece proxy
 ao navegador e não envia tokens, credenciais ou configuração de perfil para componentes
 cliente. A resposta permanece `no-store` e é validada pelo contrato Zod gerado.
@@ -121,11 +165,12 @@ npm.cmd test
 npm.cmd run build
 npx.cmd playwright install chromium
 npm.cmd run test:ui
+npm.cmd run test:ui:internal
 ```
 
 Vitest usa transportes de teste e assinaturas RSA reais para validar PKCE, state, nonce, issuer/audience, expiração, assinatura, replay, sessão, cookies, CSRF e o cliente HTTP. O alias `server-only` é substituído apenas na configuração do Vitest.
 
-Playwright inicia um provedor HTTPS de teste na porta 4443, API de teste na 8100, Next dev na 3100 e o build de produção na 3200 para verificar o bloqueio seguro. Execute o build antes da suíte; as portas devem estar livres. Chaves são efêmeras; apenas o certificado público de teste é escrito em `.test-tls/`, ignorado no Git. `NODE_EXTRA_CA_CERTS` é definido somente para o processo de teste, sem desativar validação TLS do BFF. O navegador aceita o certificado local nesse teste. Nenhum endpoint de fixture existe na aplicação. Traces ficam desabilitados para evitar capturar códigos/cookies de autenticação.
+Playwright cobre OIDC com provedor HTTPS de teste na porta 4443, API de teste na 8100, Next dev na 3100 e o build de produção na 3200. A suíte interna separada usa Next na 3300 e a API isolada de teste. Execute o build antes da suíte OIDC; as portas devem estar livres. Chaves são efêmeras; apenas o certificado público de teste é escrito em `.test-tls/`, ignorado no Git. `NODE_EXTRA_CA_CERTS` é definido somente para o processo de teste, sem desativar validação TLS do BFF. Nenhum endpoint de fixture existe na aplicação. Traces ficam desabilitados para evitar capturar credenciais ou cookies.
 
 Testes de navegador exercitam desktop/mobile, navegação, modal, retorno de foco, proteção das quatro rotas, logout, CSRF, falta de permissão e ausência de tokens em HTML/storage/cookies acessíveis por JavaScript. A integração com provedor e API reais requer configuração externa e não é substituída por esses testes.
 

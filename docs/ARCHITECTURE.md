@@ -1306,3 +1306,67 @@ O frontend permanece no fluxo OIDC do BFF e não foi alterado. Ele ainda não en
 credenciais internas nem guarda o token opaco da FastAPI no `SessionStore`; login web
 interno requer um commit posterior. Não há JWT interno, fallback entre modos, usuário
 padrão, bypass, Redis ou mudança nos contratos operacionais e regras USIAR.
+
+---
+
+## 44. Login interno no BFF Next.js
+
+O Commit 24 integra a autenticação interna da seção 43 sem remover OIDC. O frontend
+passa a exigir `AUTH_MODE=internal|oidc`, instancia somente o modo selecionado e falha
+fechado para configuração ausente ou inválida. Cookies têm nomes e formatos distintos;
+token interno nunca é oferecido ao cliente OIDC e JWT OIDC nunca é oferecido ao
+autenticador interno.
+
+```text
+Navegador -> POST /auth/login (Origin + Fetch Metadata + CSRF de pré-login)
+           -> Next.js BFF -> POST /api/v1/auth/session -> FastAPI -> PostgreSQL
+           <- cookie HttpOnly com envelope AES-256-GCM
+
+Navegador -> página protegida -> Server Component -> Bearer opaco -> FastAPI
+                                                     -> sessão/permissões no PostgreSQL
+```
+
+### Envelope e autoridade de sessão
+
+No modo interno não existe `SessionStore` paralelo. A resposta de login da FastAPI é
+validada por Zod e selada em cookie com AES-256-GCM, IV aleatório de 96 bits, tag de
+autenticação e AAD versionada. O payload estrito contém somente versão, modo `internal`,
+token opaco, segredo CSRF da API, CSRF independente do navegador e expiração absoluta.
+Formato, tamanho, modo, tag e prazo são verificados antes do uso. A chave
+`AUTH_COOKIE_KEY` contém exatamente 32 bytes aleatórios em base64url canônico, permanece
+somente no servidor e precisa ser persistida com segurança entre reinicializações e
+réplicas. Sua rotação invalida os cookies cifrados pela chave anterior.
+
+O cookie é HttpOnly, SameSite=Lax, Path=/ e não define Domain. HTTPS/produção exige
+Secure e prefixo `__Host-`. Sua expiração nunca ultrapassa `absolute_expires_at`. O
+limite de inatividade continua exclusivamente na FastAPI. Cookie válido apenas libera
+o BFF para enviar o Bearer: cada chamada operacional revalida digest, revogação, prazos,
+usuário ativo, versão da senha e permissões atuais no PostgreSQL. O dashboard usa sua
+consulta real e não adiciona `/ready`; páginas sem consulta própria usam `/ready`.
+
+### Login, CSRF e logout
+
+`GET /login` prepara uma tentativa curta por `GET /auth/login`. `POST /auth/login`
+aceita somente formulário URL encoded limitado, com `csrf`, `email` e `password`
+exatamente uma vez. Origin deve ser `APP_ORIGIN`, Fetch Metadata deve ser same-origin e
+o CSRF usa comparação em tempo constante. O BFF chama somente a URL fixa da FastAPI,
+com timeout, redirect desabilitado, cache no-store, credentials omit e request ID. Uma
+resposta válida gera novo CSRF do navegador e cookie cifrado; senha, token e CSRF da API
+não entram em HTML, URL, logs ou Web Storage.
+
+O CSRF apresentado no formulário de logout é exclusivo do salto navegador→Next.js. O
+segredo entregue pela FastAPI permanece cifrado e aparece somente em `X-CSRF-Token` no
+salto Next.js→FastAPI. `POST /auth/logout` revoga a sessão persistente antes de apagar o
+cookie. Respostas 204 e 401 permitem limpeza local. Falhas 403, 500, 503, timeout ou
+rede mantêm o cookie e retornam erro sanitizado, porque o BFF não pode afirmar que a
+revogação ocorreu. Logout por GET permanece proibido.
+
+### OIDC e produção
+
+OIDC preserva discovery, PKCE S256, state, nonce, validação assinada, `SessionStore` e
+identidade de reviewer existentes. Seu store em memória continua restrito a
+desenvolvimento/testes e falha fechado em produção. O modo interno pode compartilhar
+o cookie cifrado entre réplicas quando todas recebem a mesma chave, enquanto a sessão
+e sua revogação permanecem centralizadas no PostgreSQL. Produção ainda exige TLS,
+gestão e rotação de segredos, proteção de borda contra abuso e logs sem corpos,
+Authorization ou cookies.

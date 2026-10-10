@@ -8,7 +8,13 @@ export function sameSecret(expected: string, received: string) {
 export class CsrfError extends Error {
   constructor() { super("Solicitação não autorizada."); }
 }
-export async function verifyCsrf(request: Request, origin: string, expected: string) {
+export async function verifyForm(
+  request: Request,
+  origin: string,
+  expected: string,
+  fields: readonly string[] = ["csrf"],
+  maxBytes = 2048,
+) {
   const site = request.headers.get("sec-fetch-site");
   if (request.method !== "POST" || request.headers.get("origin") !== origin ||
     (site !== null && site !== "same-origin") ||
@@ -21,10 +27,18 @@ export async function verifyCsrf(request: Request, origin: string, expected: str
     while (true) {
       const chunk = await reader.read(); if (chunk.done) break;
       size += chunk.value.length;
-      if (size > 2048) { await reader.cancel(); throw new CsrfError(); }
+      if (size > maxBytes) { await reader.cancel(); throw new CsrfError(); }
       parts.push(chunk.value);
     }
   } finally { reader.releaseLock(); }
   const form = new URLSearchParams(Buffer.concat(parts).toString("utf8"));
-  if (form.getAll("csrf").length !== 1 || !sameSecret(expected, form.get("csrf") ?? "")) throw new CsrfError();
+  const allowed = new Set(fields);
+  if ([...form.keys()].some(name => !allowed.has(name)) ||
+    fields.some(name => form.getAll(name).length !== 1) ||
+    !sameSecret(expected, form.get("csrf") ?? "")) throw new CsrfError();
+  return form;
+}
+
+export async function verifyCsrf(request: Request, origin: string, expected: string) {
+  await verifyForm(request, origin, expected);
 }

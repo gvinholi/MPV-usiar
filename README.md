@@ -269,6 +269,7 @@ $env:AUTH_MODE = 'internal'
 
 `POST /api/v1/auth/session` aceita somente e-mail e senha e devolve uma sessão opaca
 e um segredo CSRF. `DELETE /api/v1/auth/session` exige ambos como Bearer e
-`X-CSRF-Token`. A API não define cookies. O BFF Next.js ainda usa exclusivamente OIDC;
-a integração web interna pertence a um commit posterior. Assim, a FastAPI aceita a
-identidade interna, mas o formulário do navegador ainda não executa esse fluxo.
+`X-CSRF-Token`. A API não define cookies. O BFF Next.js seleciona o mesmo `AUTH_MODE`:
+em `internal`, envia credenciais somente server-side, cifra token e CSRF da API em cookie
+HttpOnly e mantém o PostgreSQL como autoridade; em `oidc`, preserva Authorization Code
+com PKCE. Consulte a seção 44 da arquitetura e o README do frontend.

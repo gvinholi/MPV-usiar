@@ -30,18 +30,18 @@ function errorDescription(error: ApiError) {
 }
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<RawSearchParams> }) {
-  const { auth, id } = await requireSession();
+  const session = await requireSession();
   const parsed = parseDashboardUrlQuery(await searchParams);
   if (!parsed.success) return <Message title="Período inválido" description="Use somente limites ISO 8601 válidos, com fuso, e mantenha o início anterior ao fim." clearFilters />;
 
-  const profile = configuredDashboardProfile(auth.env);
+  const profile = configuredDashboardProfile(session.env);
   if (!profile.success) return <Message title="Perfil não configurado" description="Configure exatamente um API_PROFILE_ID válido ou API_PROFILE_CODE no ambiente do servidor." />;
 
   let summary: DashboardSummaryResponse;
   try {
-    summary = await createApiClient(auth.env, auth.store, id).getDashboardSummary({ ...profile.data, ...parsed.data });
+    summary = await createApiClient(session.env, session.credential).getDashboardSummary({ ...profile.data, ...parsed.data });
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401) redirect("/login");
+    if (error instanceof ApiError && error.status === 401) redirect("/login?error=session");
     if (error instanceof ApiError) return <Message title="Consulta indisponível" description={errorDescription(error)} requestId={error.requestId} />;
     return <Message title="Consulta indisponível" description="Serviço temporariamente indisponível." />;
   }

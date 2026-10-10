@@ -6,7 +6,8 @@ import { AuthenticationError, createOidcClient } from "./oidc";
 import { sameSecret } from "./csrf";
 
 export const TRANSACTION_SECONDS = 300;
-export function cookieSettings(env: Environment, kind: "session" | "login", maxAge: number) {
+export type CookieKind = "session" | "internal-session" | "login";
+export function cookieSettings(env: Environment, kind: CookieKind, maxAge: number) {
   return { name: `${env.production ? "__Host-" : ""}usiar-${kind}`, httpOnly: true,
     secure: env.production || env.APP_ORIGIN.startsWith("https:"), sameSite: "lax" as const, path: "/", maxAge };
 }
@@ -46,6 +47,7 @@ type Runtime = ReturnType<typeof createAuthService>;
 const globalRuntime = globalThis as typeof globalThis & { usiarAuth?: Runtime };
 export function getAuthRuntime(): Runtime {
   const env = readEnvironment();
+  if (env.AUTH_MODE !== "oidc") throw new Error("OIDC authentication is not active.");
   // Never select an in-memory fallback in production. Build is allowed; requests fail closed.
   if (env.production) throw new Error("Armazenamento compartilhado de sessões ainda não configurado.");
   if (!globalRuntime.usiarAuth) globalRuntime.usiarAuth = createAuthService(env,
