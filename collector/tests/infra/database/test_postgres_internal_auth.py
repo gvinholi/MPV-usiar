@@ -1,27 +1,42 @@
 from __future__ import annotations
 
+import base64
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.orm import sessionmaker
-
+from argon2 import PasswordHasher as RawArgon2PasswordHasher
+from argon2 import Type
+from collector.api.app import create_app
+from collector.api.settings import ApiSettings
 from collector.application.internal_auth import (
     ADMIN_PERMISSIONS,
     AuditEvent,
     AuditOutcome,
     BootstrapAdmin,
     BootstrapAlreadyCompletedError,
+    InternalLoginService,
     InternalSession,
+    InternalSessionService,
+    InvalidCsrfTokenError,
+    InvalidInternalSessionError,
     LoginAttempt,
+    LoginRatePolicy,
     PasswordHasher,
+    RateLimitKeyDeriver,
+    generate_session_secrets,
+    parse_session_token,
 )
 from collector.infra.database import SqlAlchemyInternalAuthRepository
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 pytestmark = pytest.mark.postgres
 NOW = datetime(2026, 10, 9, 15, tzinfo=UTC)
+RATE_KEY = base64.urlsafe_b64encode(b"p" * 32).rstrip(b"=").decode()
 
 
 @pytest.fixture
@@ -201,3 +216,248 @@ def test_bootstrap_rolls_back_user_permissions_and_event_on_failure(
         db_session.execute(text("SELECT count(*) FROM auth_audit_events")).scalar_one()
         == 1
     )
+
+
+def test_real_login_session_permissions_password_version_and_logout(
+    repository, db_session
+) -> None:
+    user_id = bootstrap(repository)
+    login = InternalLoginService(
+        repository, PasswordHasher(), RateLimitKeyDeriver(RATE_KEY)
+    )
+    sessions = InternalSessionService(repository)
+    created = login.login(
+        "admin@example.com",
+        "senha de bootstrap muito forte",
+        request_id="pg-login",
+        now=NOW + timedelta(minutes=1),
+    )
+
+    identity = sessions.authenticate(
+        created.session_token, now=NOW + timedelta(minutes=2)
+    )
+    assert identity.user_id == user_id
+    assert identity.permissions == frozenset({"dashboard:read", "reviews:write"})
+    assert db_session.execute(
+        text("SELECT last_login_at FROM auth_users WHERE id=:id"), {"id": user_id}
+    ).scalar_one() == NOW + timedelta(minutes=1)
+
+    db_session.execute(
+        text(
+            "DELETE FROM auth_user_permissions "
+            "WHERE user_id=:id AND permission_code='reviews:write'"
+        ),
+        {"id": user_id},
+    )
+    db_session.commit()
+    changed = sessions.authenticate(
+        created.session_token, now=NOW + timedelta(minutes=3)
+    )
+    assert changed.permissions == frozenset({"dashboard:read"})
+
+    sessions.logout(
+        created.session_token,
+        created.csrf_token,
+        request_id="pg-logout",
+        now=NOW + timedelta(minutes=4),
+    )
+    sessions.logout(
+        created.session_token,
+        created.csrf_token,
+        request_id="pg-logout-retry",
+        now=NOW + timedelta(minutes=5),
+    )
+    with pytest.raises(InvalidInternalSessionError):
+        sessions.authenticate(created.session_token, now=NOW + timedelta(minutes=5))
+    assert (
+        db_session.execute(
+            text(
+                "SELECT count(*) FROM auth_audit_events WHERE event_type='SESSION_REVOKED'"
+            )
+        ).scalar_one()
+        == 1
+    )
+
+    second = login.login(
+        "admin@example.com",
+        "senha de bootstrap muito forte",
+        request_id="pg-login-2",
+        now=NOW + timedelta(minutes=6),
+    )
+    db_session.execute(
+        text(
+            "UPDATE auth_users SET password_version=password_version+1, "
+            "updated_at=:now WHERE id=:id"
+        ),
+        {"id": user_id, "now": NOW + timedelta(minutes=7)},
+    )
+    db_session.commit()
+    with pytest.raises(InvalidInternalSessionError):
+        sessions.authenticate(second.session_token, now=NOW + timedelta(minutes=8))
+
+
+def test_identifier_rate_limit_is_atomic_under_real_concurrency(repository) -> None:
+    deriver = RateLimitKeyDeriver(RATE_KEY)
+    identifier = deriver.identifier("admin@example.com")
+    global_key = deriver.global_key()
+    policy = LoginRatePolicy()
+
+    def reserve(_index):
+        return repository.reserve_login_attempt(
+            identifier, global_key, NOW, policy
+        ).allowed
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        results = list(pool.map(reserve, range(10)))
+    assert results.count(True) == 5
+    assert results.count(False) == 5
+
+
+def test_global_rate_limit_is_shared_across_identifiers(repository) -> None:
+    deriver = RateLimitKeyDeriver(RATE_KEY)
+    policy = LoginRatePolicy()
+    allowed = [
+        repository.reserve_login_attempt(
+            deriver.identifier(f"user-{index}@example.com"),
+            deriver.global_key(),
+            NOW,
+            policy,
+        ).allowed
+        for index in range(61)
+    ]
+    assert allowed[:60] == [True] * 60
+    assert allowed[60] is False
+
+
+def test_session_expiration_touch_interval_and_valid_csrf_mismatch(
+    repository, db_session
+) -> None:
+    bootstrap(repository)
+    login = InternalLoginService(
+        repository, PasswordHasher(), RateLimitKeyDeriver(RATE_KEY)
+    )
+    sessions = InternalSessionService(repository)
+    created = login.login(
+        "admin@example.com",
+        "senha de bootstrap muito forte",
+        request_id=None,
+        now=NOW,
+    )
+    session_id, _ = parse_session_token(created.session_token)
+
+    sessions.authenticate(created.session_token, now=NOW + timedelta(minutes=4))
+    assert (
+        db_session.execute(
+            text("SELECT last_seen_at FROM auth_sessions WHERE id=:id"),
+            {"id": session_id},
+        ).scalar_one()
+        == NOW
+    )
+    sessions.authenticate(created.session_token, now=NOW + timedelta(minutes=6))
+    touched = db_session.execute(
+        text("SELECT last_seen_at, idle_expires_at FROM auth_sessions WHERE id=:id"),
+        {"id": session_id},
+    ).one()
+    assert touched == (
+        NOW + timedelta(minutes=6),
+        NOW + timedelta(minutes=36),
+    )
+
+    wrong_csrf = generate_session_secrets().csrf_token
+    with pytest.raises(InvalidCsrfTokenError):
+        sessions.logout(
+            created.session_token,
+            wrong_csrf,
+            request_id=None,
+            now=NOW + timedelta(minutes=7),
+        )
+    with pytest.raises(InvalidInternalSessionError):
+        sessions.authenticate(created.session_token, now=NOW + timedelta(hours=8))
+
+
+def test_login_rehash_is_atomic_and_invalidates_older_password_version(
+    repository, db_session
+) -> None:
+    user_id = bootstrap(repository)
+    old_hash = RawArgon2PasswordHasher(
+        time_cost=1,
+        memory_cost=19 * 1024,
+        parallelism=1,
+        hash_len=32,
+        salt_len=16,
+        type=Type.ID,
+    ).hash("senha de bootstrap muito forte")
+    db_session.execute(
+        text("UPDATE auth_users SET password_hash=:hash WHERE id=:id"),
+        {"hash": old_hash, "id": user_id},
+    )
+    db_session.commit()
+    login = InternalLoginService(
+        repository, PasswordHasher(), RateLimitKeyDeriver(RATE_KEY)
+    )
+    created = login.login(
+        "admin@example.com",
+        "senha de bootstrap muito forte",
+        request_id="rehash",
+        now=NOW + timedelta(minutes=1),
+    )
+    password_hash, password_version = db_session.execute(
+        text("SELECT password_hash, password_version FROM auth_users WHERE id=:id"),
+        {"id": user_id},
+    ).one()
+    assert password_version == 2
+    assert password_hash != old_hash
+    assert PasswordHasher().verify(password_hash, "senha de bootstrap muito forte")
+    assert (
+        InternalSessionService(repository)
+        .authenticate(created.session_token, now=NOW + timedelta(minutes=2))
+        .user_id
+        == user_id
+    )
+
+
+def test_internal_http_login_authorization_logout_and_replay(
+    migrated_engine, db_session
+) -> None:
+    factory = sessionmaker(
+        bind=migrated_engine, autoflush=False, expire_on_commit=False
+    )
+    repository = SqlAlchemyInternalAuthRepository(factory)
+    bootstrap(repository)
+    api = TestClient(
+        create_app(
+            queries=object(),
+            session_factory=factory,
+            settings=ApiSettings(
+                auth_mode="internal",
+                database_url="postgresql-configured-server-side",
+                internal_auth_rate_limit_key=RATE_KEY,
+            ),
+        ),
+        raise_server_exceptions=False,
+    )
+    login = api.post(
+        "/api/v1/auth/session",
+        json={
+            "email": "admin@example.com",
+            "password": "senha de bootstrap muito forte",
+        },
+    )
+    assert login.status_code == 201
+    body = login.json()
+    authorization = {"Authorization": f"Bearer {body['session_token']}"}
+    assert (
+        api.get(
+            "/ready", headers={"Authorization": "Bearer header.payload.signature"}
+        ).status_code
+        == 401
+    )
+    assert api.get("/ready", headers=authorization).status_code == 200
+    logout = api.delete(
+        "/api/v1/auth/session",
+        headers={**authorization, "X-CSRF-Token": body["csrf_token"]},
+    )
+    assert logout.status_code == 204
+    replay = api.get("/ready", headers=authorization)
+    assert replay.status_code == 401
+    assert replay.json()["error"]["code"] == "INVALID_CREDENTIALS"

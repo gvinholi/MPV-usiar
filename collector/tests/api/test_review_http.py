@@ -10,6 +10,7 @@ from collector.api.security import (
     AuthenticationError,
     AuthenticationUnavailableError,
 )
+from collector.api.settings import ApiSettings
 from collector.application.human_review.models import (HumanReview, HumanReviewDecision, HumanReviewReason,
     IdempotencyConflictError, StaleOperationalResolutionError)
 from collector.application.human_review_errors import OperationalResolutionNotFoundError
@@ -57,6 +58,7 @@ def payload(**overrides):
 
 def client(service=None, authenticator=None):
     return TestClient(create_app(queries=Queries(), review_service=service or ReviewService(),
+                                 settings=ApiSettings(auth_mode="oidc"),
                                  authenticator=authenticator), raise_server_exceptions=False)
 
 
@@ -67,8 +69,8 @@ def test_missing_token_is_401_with_challenge():
 
 
 def test_unconfigured_authentication_fails_closed():
-    response = client().post("/api/v1/reviews", json=payload(), headers={"Authorization":"Bearer anything"})
-    assert response.status_code == 503 and response.json()["error"]["code"] == "AUTHENTICATION_UNAVAILABLE"
+    with pytest.raises(ValueError, match="OIDC configuration is incomplete"):
+        client()
 
 
 def test_invalid_token_is_401():

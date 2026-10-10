@@ -21,6 +21,7 @@ from collector.application.human_review import (
     IdempotencyConflictError, StaleOperationalResolutionError,
 )
 from collector.api.app import create_app
+from collector.api.settings import ApiSettings
 from collector.api.security import AuthenticatedPrincipal
 from collector.infra.database import (
     SqlAlchemyScreeningRepository, SqlAlchemyOperationalResolutionRepository,
@@ -88,6 +89,7 @@ def review_client(factory):
         create_app(
             queries=object(),
             session_factory=factory,
+            settings=ApiSettings(auth_mode="oidc"),
             authenticator=AuthorizedReviewer(),
         )
     )

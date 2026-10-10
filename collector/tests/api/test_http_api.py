@@ -89,7 +89,7 @@ def api_client(fake, *, authenticator=None, session_factory=None, settings=None)
     value = TestClient(create_app(
         queries=fake,
         session_factory=session_factory,
-        settings=settings,
+        settings=settings or ApiSettings(auth_mode="oidc"),
         authenticator=authenticator or Authenticator(),
     ), raise_server_exceptions=False)
     value.headers["Authorization"] = "Bearer valid-token"
@@ -195,14 +195,14 @@ def test_ready_failure_does_not_leak(fake):
 
 
 def test_request_id_and_cors(fake):
-    app = create_app(queries=fake, settings=ApiSettings(cors_origins=("https://dashboard.example",)))
+    app = create_app(queries=fake, settings=ApiSettings(auth_mode="oidc", cors_origins=("https://dashboard.example",)), authenticator=Authenticator())
     client = TestClient(app)
     assert UUID(client.get("/health").headers["X-Request-ID"])
     assert client.get("/health", headers={"X-Request-ID":"valid-123"}).headers["X-Request-ID"] == "valid-123"
     assert client.get("/health", headers={"X-Request-ID":"x"*129}).headers["X-Request-ID"] != "x"*129
     assert client.get("/health", headers={"Origin":"https://dashboard.example"}).headers["access-control-allow-origin"] == "https://dashboard.example"
     assert "access-control-allow-origin" not in client.get("/health", headers={"Origin":"https://evil.example"}).headers
-    default = TestClient(create_app(queries=fake)).get("/health", headers={"Origin":"https://dashboard.example"})
+    default = TestClient(create_app(queries=fake, settings=ApiSettings(auth_mode="oidc"), authenticator=Authenticator())).get("/health", headers={"Origin":"https://dashboard.example"})
     assert "access-control-allow-origin" not in default.headers
 
 
@@ -250,7 +250,7 @@ OPERATIONAL_GETS = (
 @pytest.mark.parametrize(("path", "params"), OPERATIONAL_GETS)
 def test_every_operational_get_requires_token(fake, path, params):
     response = TestClient(create_app(queries=fake, session_factory=lambda: Session(),
-        authenticator=Authenticator()), raise_server_exceptions=False).get(path, params=params)
+        settings=ApiSettings(auth_mode="oidc"), authenticator=Authenticator()), raise_server_exceptions=False).get(path, params=params)
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "INVALID_CREDENTIALS"
 
@@ -317,18 +317,15 @@ def test_openapi_documents_dashboard_permission_on_all_operational_gets(fake):
 
 
 def test_documentation_is_disabled_by_default_in_production_and_can_be_enabled(fake):
-    production = TestClient(create_app(queries=fake, settings=ApiSettings(environment="production")))
+    production = TestClient(create_app(queries=fake, settings=ApiSettings(auth_mode="oidc", environment="production"), authenticator=Authenticator()))
     for path in ("/docs", "/redoc", "/openapi.json"):
         assert production.get(path).status_code == 404
     enabled = TestClient(create_app(
-        queries=fake, settings=ApiSettings(environment="production", api_docs_enabled=True)
+        queries=fake, settings=ApiSettings(auth_mode="oidc", environment="production", api_docs_enabled=True), authenticator=Authenticator()
     ))
     assert enabled.get("/openapi.json").status_code == 200
 
 
 def test_protected_get_fails_closed_when_oidc_is_not_configured(fake):
-    response = TestClient(create_app(queries=fake), raise_server_exceptions=False).get(
-        "/api/v1/collection-rounds", headers={"Authorization": "Bearer token"}
-    )
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "AUTHENTICATION_UNAVAILABLE"
+    with pytest.raises(ValueError, match="OIDC configuration is incomplete"):
+        create_app(queries=fake, settings=ApiSettings(auth_mode="oidc"))

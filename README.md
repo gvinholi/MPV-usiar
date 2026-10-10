@@ -59,7 +59,7 @@ uvicorn collector.api.app:create_app --factory --reload
 ```
 
 `/health` não acessa o banco e permanece público. `/ready`, que verifica a conexão,
-e todas as rotas GET operacionais exigem Bearer JWT OIDC com a permissão
+e todas as rotas GET operacionais exigem Bearer selecionado por AUTH_MODE com a permissão
 `dashboard:read`. A única escrita HTTP é `POST /api/v1/reviews`, protegida pela
 permissão independente `reviews:write`. Uma permissão não concede a outra; um
 principal pode receber ambas explicitamente.
@@ -77,8 +77,7 @@ GET /api/v1/opportunities?profile_code=USIAR&page=1&page_size=25
 GET /api/v1/opportunities/by-source?source=PNCP&official_id=00509968000148%2F2026%2F3341&profile_code=USIAR
 ```
 
-Para habilitar as rotas protegidas, configure os valores aprovados para o provedor
-OIDC compatível:
+`AUTH_MODE` deve selecionar `oidc` ou `internal`. Para OIDC, configure:
 
 ```text
 OIDC_ISSUER=https://issuer.example
@@ -88,12 +87,10 @@ OIDC_ALGORITHMS=RS256
 OIDC_JWKS_CACHE_SECONDS=300
 ```
 
-Sem issuer, audience e JWKS URL, qualquer rota protegida falha de forma fechada com
-503 quando recebe uma credencial Bearer; uma requisição sem credencial retorna 401.
-O provedor de produção ainda não foi escolhido; a implantação depende dessa decisão
-e da concessão explícita dos scopes `dashboard:read` e/ou `reviews:write` conforme a
-função do principal. Tokens não devem ser colocados em arquivos versionados nem
-registrados em logs.
+Configuração ausente ou incoerente impede a inicialização da API. O provedor de
+produção ainda não foi escolhido; conceda explicitamente `dashboard:read` e/ou
+`reviews:write` conforme a função do principal. Tokens não devem ser colocados em
+arquivos versionados nem registrados em logs.
 
 `OIDC_JWKS_URL` deve ser uma URL HTTPS válida, sem credenciais embutidas. O conjunto
 JWKS é mantido em cache pelo TTL configurado, entre 1 e 3600 segundos; chaves
@@ -173,10 +170,12 @@ permissões em uma transação e recusa execução quando já existe qualquer us
 Não passe senha na linha de comando e não registre sua saída em logs que contenham
 entrada interativa. Não existe senha padrão ou usuário criado pela migration.
 
-Esta etapa não oferece login HTTP, formulário no frontend, token JWT interno ou
-integração das permissões internas com os scopes atuais da FastAPI. O fluxo OIDC
-existente permanece ativo e é o único fluxo de login web até a próxima etapa.
-Detalhes estão na [seção 42 da arquitetura](docs/ARCHITECTURE.md#42-fundação-da-autenticação-interna).
+A FastAPI agora oferece login HTTP e sessões opacas quando `AUTH_MODE=internal`, com
+as permissões persistidas aplicadas às mesmas verificações das rotas operacionais.
+Não há JWT interno nem formulário frontend integrado; o fluxo OIDC permanece como
+modo alternativo. Detalhes estão nas seções
+[42](docs/ARCHITECTURE.md#42-fundação-da-autenticação-interna) e
+[43](docs/ARCHITECTURE.md#43-autenticação-interna-da-fastapi).
 
 Coleta, persistência, triagem, catálogo e aquisição de artefatos são passos separados. `CatalogProcessDocuments.catalog()` consulta metadados; `AcquireDocumentArtifact.acquire(document)` baixa um documento já catalogado, sob demanda.
 
@@ -252,3 +251,24 @@ Perfil é explícito: id ou code; code com múltiplas versões exige id. Pagina�
 ## Segurança
 
 Credenciais não devem ser commitadas. Use `.env` apenas em desenvolvimento local. Em produção, use Secret Manager.
+
+### Autenticação selecionável da FastAPI
+
+`AUTH_MODE` é obrigatório e aceita somente `oidc` ou `internal`; configuração ausente,
+inválida ou incompleta impede a inicialização. Em `oidc`, issuer, audience e JWKS URL
+continuam obrigatórios. Em `internal`, execute a migration `0009`, crie o primeiro
+Admin/Dev pelo comando interativo documentado na seção 42 da arquitetura e defina um
+`INTERNAL_AUTH_RATE_LIMIT_KEY` base64url canônico com pelo menos 32 bytes aleatórios.
+
+```powershell
+$bytes = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$env:INTERNAL_AUTH_RATE_LIMIT_KEY = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
+$env:AUTH_MODE = 'internal'
+```
+
+`POST /api/v1/auth/session` aceita somente e-mail e senha e devolve uma sessão opaca
+e um segredo CSRF. `DELETE /api/v1/auth/session` exige ambos como Bearer e
+`X-CSRF-Token`. A API não define cookies. O BFF Next.js ainda usa exclusivamente OIDC;
+a integração web interna pertence a um commit posterior. Assim, a FastAPI aceita a
+identidade interna, mas o formulário do navegador ainda não executa esse fluxo.

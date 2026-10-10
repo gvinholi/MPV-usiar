@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 import jwt
 import pytest
@@ -10,7 +11,14 @@ from collector.api.security import (
     AuthenticationConfigurationError,
     AuthenticationError,
     AuthenticationUnavailableError,
+    AuthenticatedPrincipal,
+    AuthenticationKind,
+    InternalSessionAuthenticator,
     OidcJwtAuthenticator,
+)
+from collector.application.internal_auth import (
+    AuthenticatedInternalSession,
+    InvalidInternalSessionError,
 )
 
 ISSUER = "https://issuer.test.example"
@@ -231,3 +239,42 @@ def test_unknown_kid_refreshes_the_configured_jwks_after_cooldown(rsa_keys):
 def test_identity_over_application_limit_is_rejected(rsa_keys):
     private, public = rsa_keys
     with pytest.raises(AuthenticationError): authenticator(public).authenticate(token(private, sub="x" * 200))
+
+
+def test_reviewer_identity_remains_stable_for_oidc_and_is_namespaced_for_internal():
+    oidc = AuthenticatedPrincipal(ISSUER, "user-123", None, frozenset())
+    assert oidc.reviewer_id == f"oidc:{len(ISSUER)}:{ISSUER}user-123"
+    internal = AuthenticatedPrincipal(
+        "urn:mpv-usiar:internal",
+        "00000000-0000-4000-8000-000000000001",
+        None,
+        frozenset(),
+        AuthenticationKind.INTERNAL,
+    )
+    assert internal.reviewer_id == "internal:00000000-0000-4000-8000-000000000001"
+
+
+def test_internal_authenticator_maps_identity_and_fails_closed():
+    class Sessions:
+        failure = None
+
+        def authenticate(self, _token):
+            if self.failure:
+                raise self.failure
+            return AuthenticatedInternalSession(
+                UUID("00000000-0000-4000-8000-000000000001"),
+                "Admin",
+                frozenset({"dashboard:read"}),
+            )
+
+    sessions = Sessions()
+    value = InternalSessionAuthenticator(sessions)
+    principal = value.authenticate("opaque")
+    assert principal.authentication_kind is AuthenticationKind.INTERNAL
+    assert principal.permissions == frozenset({"dashboard:read"})
+    sessions.failure = InvalidInternalSessionError()
+    with pytest.raises(AuthenticationError):
+        value.authenticate("opaque")
+    sessions.failure = RuntimeError("database unavailable")
+    with pytest.raises(AuthenticationUnavailableError):
+        value.authenticate("opaque")

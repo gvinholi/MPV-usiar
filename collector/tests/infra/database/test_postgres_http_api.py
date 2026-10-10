@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from collector.api.app import create_app
+from collector.api.settings import ApiSettings
 from collector.api.security import AuthenticatedPrincipal
 from collector.application.read_model.service import DashboardQueries
 from collector.infra.database.read_model_store import SqlAlchemyReadModelStore
@@ -36,6 +37,7 @@ def test_ready_and_zero_record_round_statuses_over_real_postgres(migrated_engine
     factory = sessionmaker(bind=migrated_engine, autoflush=False, expire_on_commit=False)
     client = TestClient(create_app(
         queries=DashboardQueries(SqlAlchemyReadModelStore(factory)), session_factory=factory,
+        settings=ApiSettings(auth_mode="oidc"),
         authenticator=DashboardAuthenticator(),
     ), headers={"Authorization": "Bearer postgres-test-token"})
     assert client.get("/ready").json() == {"status": "ready"}

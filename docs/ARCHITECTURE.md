@@ -1180,7 +1180,7 @@ login web continua dependendo do fluxo OIDC descrito na seção 40.
 ```text
 CLI bootstrap -> serviço de aplicação -> repositório SQLAlchemy -> PostgreSQL
 
-Futuro login HTTP -> autenticação + rate limit -> sessão opaca/JWT interno -> FastAPI
+Login HTTP (seção 43) -> autenticação + rate limit -> sessão opaca -> FastAPI
 ```
 
 ### Persistência
@@ -1236,14 +1236,73 @@ credenciais padrão nem opção de senha por argumento.
 ### Limites e próxima etapa
 
 As interfaces de aplicação separam usuários, sessões, tentativas e auditoria do
-adaptador SQLAlchemy. O modelo de sessão está pronto para armazenar apenas um
-identificador público e digests; nenhuma rotina deste commit emite cookie, JWT,
-sessão ou token. Tentativas de login também são somente persistidas: política de
-rate limiting, bloqueio operacional e proteção contra enumeração pertencem ao
-Commit 23, junto do endpoint/formulário de login e emissão segura de credencial para
-a FastAPI a partir das permissões internas.
+adaptador SQLAlchemy. O Commit 22 limitou-se à persistência dessa fundação; a seção 43
+documenta a autenticação HTTP, o rate limiting e a emissão da sessão opaca adicionados
+pelo Commit 23. O formulário e o SessionStore do frontend continuam fora desse escopo.
 
 Produção ainda requer definição de chaves de assinatura/rotação, store usado pelo
 BFF, invalidação coordenada, limites operacionais, alertas de auditoria, TLS e gestão
 de segredos. O OIDC deve permanecer disponível como estratégia futura até uma decisão
 específica de migração; esta fundação não é bypass para as verificações atuais.
+
+---
+
+## 43. Autenticação interna da FastAPI
+
+O Commit 23 torna a fundação interna utilizável pela FastAPI sem remover OIDC.
+`AUTH_MODE` é obrigatório e aceita exatamente `internal` ou `oidc`; configuração
+ausente, inválida ou incompleta falha durante a composição da aplicação. Cada processo
+instancia somente o autenticador selecionado. Tokens internos nunca são tentados como
+JWT OIDC e JWTs nunca são tentados como sessões internas.
+
+Ambos os autenticadores produzem o mesmo principal usado por `require_permission()`.
+OIDC preserva o reviewer `oidc:<tamanho-do-issuer>:<issuer><sub>`. Identidades internas
+usam `internal:<uuid-do-usuário>`. Em ambos os casos, `dashboard:read` e
+`reviews:write` continuam independentes e a autorização permanece na FastAPI.
+
+### Login e sessão
+
+Somente no modo interno, `POST /api/v1/auth/session` recebe JSON estrito com `email`
+e `password`, limitado a 2 KiB. O e-mail é normalizado como no bootstrap. Usuário
+inexistente executa uma verificação Argon2id contra hash fictício; usuário inativo,
+senha incorreta e inexistência retornam a mesma resposta. No sucesso, rehash e
+`last_login_at`, sessão e auditoria são persistidos atomicamente.
+
+O token é `usiar_s1.<uuid-canônico>.<verificador-base64url>`. Verificador e segredo
+CSRF possuem 256 bits aleatórios independentes; somente digests SHA-256 são gravados.
+A sessão expira após 30 minutos de inatividade ou oito horas absolutas. `last_seen_at`
+é atualizado no máximo a cada cinco minutos e nunca amplia o limite absoluto. Cada
+uso revalida digest em tempo constante, revogação, prazos, usuário ativo, versão da
+senha e permissões atuais no PostgreSQL. A resposta de login não define cookie e
+contém somente tipo, token, CSRF e os dois prazos, sempre com `no-store`.
+
+`DELETE /api/v1/auth/session` exige Bearer interno e `X-CSRF-Token`, revoga a sessão
+em transação e responde 204. Repetir o mesmo logout é idempotente; o token revogado
+não volta a autenticar. Endpoints internos não são registrados em modo OIDC.
+
+### Força bruta e disponibilidade
+
+As chaves de tentativa são HMAC-SHA-256 do e-mail normalizado e de um domínio global,
+derivadas de `INTERNAL_AUTH_RATE_LIMIT_KEY`. O segredo é obrigatório em modo interno,
+base64url canônico e deve conter ao menos 32 bytes aleatórios. O PostgreSQL serializa
+reservas concorrentes com advisory locks transacionais. São permitidas cinco tentativas
+por identificador em 15 minutos, seguidas por bloqueio de 15 minutos, e 60 tentativas
+globais por minuto, seguidas por bloqueio de 60 segundos. No máximo duas verificações
+Argon2id rodam simultaneamente por processo; espera de capacidade é limitada.
+
+Falha do armazenamento ou esgotamento de capacidade resulta em 503, sem autenticação.
+A API não confia em `X-Forwarded-For`; o limite global é independente de IP. Isso evita
+confiar em proxy não configurado, mas permite negação de serviço distribuída contra o
+limite global. Produção deve combinar TLS, proteção de borda e alertas sem executar a
+API ou tooling de desenvolvimento como serviço público irrestrito.
+
+Eventos de sucesso, falha e revogação guardam somente tipo, resultado, IDs e correlação.
+Senha, token, CSRF, hashes, HMACs e corpo HTTP não entram na auditoria nem nos logs.
+Erros de autenticação são sanitizados e não armazenáveis em cache.
+
+### Limite de integração
+
+O frontend permanece no fluxo OIDC do BFF e não foi alterado. Ele ainda não envia as
+credenciais internas nem guarda o token opaco da FastAPI no `SessionStore`; login web
+interno requer um commit posterior. Não há JWT interno, fallback entre modos, usuário
+padrão, bypass, Redis ou mudança nos contratos operacionais e regras USIAR.

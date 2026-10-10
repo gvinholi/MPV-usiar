@@ -182,3 +182,29 @@ class AuditEvent:
             or any(not (c.isalnum() or c in "._:-") for c in self.request_id)
         ):
             raise ValueError("invalid request id")
+
+
+@dataclass(frozen=True)
+class LoginAttemptReservation:
+    allowed: bool
+    retry_after_seconds: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.allowed != (self.retry_after_seconds is None):
+            raise ValueError("invalid rate-limit reservation")
+        if self.retry_after_seconds is not None and self.retry_after_seconds < 1:
+            raise ValueError("invalid retry delay")
+
+
+@dataclass(frozen=True)
+class AuthenticatedInternalSession:
+    user_id: UUID
+    display_name: str | None
+    permissions: frozenset[str]
+
+
+class SessionRevocationResult(StrEnum):
+    REVOKED = "revoked"
+    ALREADY_REVOKED = "already_revoked"
+    INVALID_CSRF = "invalid_csrf"
+    INVALID = "invalid"
