@@ -20,6 +20,7 @@ Clock = Callable[[], datetime]
 class PersistScreeningOutcome:
     evaluation_id: UUID
     created: bool
+    evaluation: ScreeningEvaluation
 
 
 class PersistScreening:
@@ -56,11 +57,11 @@ class PersistScreening:
             )
             if stored is not None:
                 return PersistScreeningOutcome(
-                    evaluation_id=stored.id, created=False
+                    evaluation_id=stored.id, created=False, evaluation=stored
                 )
             self._repository.insert_evaluation(evaluation, created_at=self._clock())
             return PersistScreeningOutcome(
-                evaluation_id=evaluation.id, created=True
+                evaluation_id=evaluation.id, created=True, evaluation=evaluation
             )
 
     def persist(

@@ -91,6 +91,13 @@ from collector.application.persistence import (
     PersistenceError,
     resolve_identities,
 )
+from collector.application.operational import (
+    OperationalCollectionRunner,
+    OperationalRunRepository,
+    OperationalRunSummary,
+    RoundObservation,
+    ScreeningMetrics,
+)
 from collector.application.screening import (
     ENGINE_VERSION,
     IncompatibleProfileError,
@@ -222,6 +229,9 @@ __all__ = [
     "DocumentStrength",
     "InitialScreeningRequiredError",
     "OperationalReasonCode",
+    "OperationalCollectionRunner",
+    "OperationalRunRepository",
+    "OperationalRunSummary",
     "OperationalResolution",
     "OperationalResolutionRepository",
     "OperationalResolver",
@@ -244,7 +254,9 @@ __all__ = [
     "ScreeningProfile",
     "ScreeningRepository",
     "ScreeningSummary",
+    "ScreeningMetrics",
     "SourceExtraction",
+    "RoundObservation",
     "TextExtractionPolicy",
     "TextExtractionRepository",
     "USIAR_V1_ID",

@@ -12,6 +12,9 @@ from collector.infra.database.human_review_store import SqlAlchemyHumanReviewRep
 from collector.infra.database.internal_auth_store import (
     SqlAlchemyInternalAuthRepository,
 )
+from collector.infra.database.operational_run_store import (
+    SqlAlchemyOperationalRunRepository,
+)
 from collector.infra.database.read_model_store import SqlAlchemyReadModelStore
 from collector.infra.database.resolution_store import (
     SqlAlchemyOperationalResolutionRepository,
@@ -32,6 +35,7 @@ __all__ = [
     "SqlAlchemyDocumentScreeningRepository",
     "SqlAlchemyHumanReviewRepository",
     "SqlAlchemyInternalAuthRepository",
+    "SqlAlchemyOperationalRunRepository",
     "SqlAlchemyOperationalResolutionRepository",
     "SqlAlchemyReadModelStore",
     "SqlAlchemyScreeningRepository",

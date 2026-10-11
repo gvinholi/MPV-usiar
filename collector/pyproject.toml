@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "ruff>=0.9,<1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

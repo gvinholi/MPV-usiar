@@ -1370,3 +1370,49 @@ o cookie cifrado entre réplicas quando todas recebem a mesma chave, enquanto a 
 e sua revogação permanecem centralizadas no PostgreSQL. Produção ainda exige TLS,
 gestão e rotação de segredos, proteção de borda contra abuso e logs sem corpos,
 Authorization ou cookies.
+
+---
+
+## 45. Runner operacional de coleta PNCP
+
+O runner operacional compõe componentes existentes sem mover regras de negócio para a
+CLI:
+
+```text
+PncpClient -> PublicationPaginator -> CollectionOrchestrator
+           -> PersistCollection -> ScreeningEngine (USIAR/v1)
+           -> PersistScreening -> OperationalResolver
+           -> PersistOperationalResolution -> métricas da rodada
+```
+
+`OperationalCollectionRunner` é o caso de uso de aplicação. O adaptador
+`SqlAlchemyOperationalRunRepository` lê somente as observações persistidas na rodada e
+atualiza `candidates`, `pending` e `discarded` na mesma `collection_round`. Assim, a
+triagem nunca opera sobre itens que falharam antes da persistência. Ausência de
+documentos neste estágio é explícita: a resolução inicial replica a triagem inicial,
+sem simular aquisição ou análise documental.
+
+A entrada operacional é `python -m collector.cli.collect run`. Datas inicial e final,
+UF e pelo menos uma modalidade são obrigatórias; modalidade pode ser repetida. O
+perfil é restrito a `USIAR/v1`. `--max-pages` limita cada modalidade e `--page-size`
+controla o tamanho solicitado ao PNCP. A CLI exige `DATABASE_URL`, usa os adaptadores
+reais e emite eventos JSON de início, fim de coleta e fim operacional. Falhas expõem
+somente código e tipo sanitizados.
+
+O contrato de saída da CLI é `0` para `SUCCESS`, `1` para `FAILED` ou exceção
+operacional, `2` para argumento inválido e `3` para `PARTIAL`. Somente `0` representa
+uma rodada completa para fins de automação. O JSON estruturado é emitido também nos
+resultados `PARTIAL` e `FAILED`, antes do encerramento com seu código correspondente.
+
+O resumo diferencia `SUCCESS`, `PARTIAL` e `FAILED`, preserva modalidades incompletas e
+contabiliza persistência, avaliações, resoluções e estados operacionais. Erros parciais
+não são convertidos em sucesso vazio. A compatibilidade de replay da coleta compara
+somente métricas pertencentes à coleta; métricas de triagem enriquecidas posteriormente
+não tornam a mesma rodada incompatível.
+
+Identidades, unicidades e histórico continuam sob os contratos de persistência já
+definidos. Reprocessar a mesma rodada não duplica observações, avaliações ou resoluções.
+Executar novamente o comando cria outra rodada e preserva as anteriores, bem como as
+revisões humanas. Não há checkpoint persistente de página: uma nova execução começa na
+página 1. Também não há scheduler neste componente; três rodadas diárias devem ser
+disparadas por infraestrutura externa em commit próprio.

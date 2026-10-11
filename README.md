@@ -152,6 +152,50 @@ docker compose down
 
 `DATABASE_URL` é a única variável de conexão. A aplicação lê essa variável num único ponto de infra.
 
+## Rodada operacional PNCP
+
+Com o PostgreSQL iniciado e as migrations aplicadas, uma rodada completa coleta o
+PNCP, persiste processos e observações, aplica o perfil `USIAR/v1`, cria a resolução
+operacional inicial e atualiza as métricas da própria rodada:
+
+```powershell
+cd collector
+$env:DATABASE_URL = "postgresql+psycopg://usiar:usiar@localhost:5433/usiar"
+python -m collector.cli.collect run `
+  --start-date 2026-10-10 `
+  --end-date 2026-10-10 `
+  --uf SP `
+  --modality 6 `
+  --max-pages 2 `
+  --page-size 10
+```
+
+Use somente códigos de modalidade confirmados no contrato vigente do PNCP. Repita
+`--modality` para consultar mais de uma modalidade. `--uf` é obrigatório para impedir
+uma coleta nacional acidental; ele filtra a UF informada pela publicação e não comprova,
+por si só, o local de execução do serviço. `--max-pages` é um limite explícito de
+segurança por modalidade (padrão 200), não um modo silencioso de teste. O único perfil
+aceito neste runner é `USIAR/v1`.
+
+A última linha de sucesso é JSON e informa `round_id`, status, modalidades completas e
+incompletas, registros recebidos, processos únicos, criações, contagens de
+`CANDIDATE`/`PENDING`/`DISCARDED` e erros. Uma modalidade interrompida produz rodada
+`PARTIAL` ou `FAILED`; não é reportada como sucesso vazio. Logs e erros não incluem
+credenciais nem corpos brutos de respostas.
+
+O código de saída permite automação sem interpretar o texto dos logs: `0` significa
+`SUCCESS`, `1` significa `FAILED` ou falha operacional inesperada, `2` é erro de uso
+dos argumentos e `3` significa `PARTIAL`. Agendadores devem aceitar somente `0` como
+rodada completa; `3` preserva o progresso, mas exige alerta ou nova execução controlada.
+
+Repetir internamente a persistência da mesma rodada é idempotente. Uma nova execução do
+comando cria uma nova rodada e novas observações históricas, reutilizando a identidade
+dos processos; revisões humanas anteriores não são sobrescritas. Ainda não há
+checkpoint entre execuções: após uma interrupção, um novo comando reinicia a paginação
+na página 1 e a deduplicação protege os processos. O agendamento das três rodadas
+diárias permanece fora deste comando e deve invocá-lo externamente em horários
+aprovados.
+
 ### Bootstrap da autenticação interna
 
 A fundação da autenticação própria mantém usuários, permissões, sessões opacas,
