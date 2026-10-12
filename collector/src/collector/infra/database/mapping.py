@@ -73,5 +73,6 @@ def snapshot_fields(process: Process) -> dict[str, object]:
         "state": process.state,
         "locality": process.locality,
         "estimated_value": process.estimated_value,
+        "notice_number": process.notice_number,
         "official_url": process.official_url,
     }

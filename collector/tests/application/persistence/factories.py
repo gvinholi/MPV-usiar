@@ -40,6 +40,8 @@ def process(
     estimated_value: Decimal | None = Decimal("10000.00"),
     closes_at: datetime | None = datetime(2026, 10, 10, 18, 0, tzinfo=UTC),
     organization_name: str | None = "Prefeitura Exemplo",
+    notice_number: str | None = None,
+    official_url: str | None = None,
 ) -> Process:
     return Process(
         id=process_id or uuid4(),
@@ -53,6 +55,8 @@ def process(
         state="SP",
         locality="Campinas",
         estimated_value=estimated_value,
+        notice_number=notice_number,
+        official_url=official_url,
         first_captured_at=last_captured_at,
         last_captured_at=last_captured_at,
     )

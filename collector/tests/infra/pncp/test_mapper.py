@@ -25,6 +25,8 @@ def valid_item(**overrides: object) -> dict[str, object]:
         "numeroControlePNCP": "56901275000150-1-000415/2026",
         "objetoCompra": "ALIENACAO DE BEM IMOVEL",
         "modalidadeNome": "Leilão - Eletrônico",
+        "numeroCompra": "000415",
+        "tipoInstrumentoConvocatorioNome": "Edital",
         "dataPublicacaoPncp": "2026-10-02T11:36:44",
         "dataEncerramentoProposta": "2026-10-23T15:00:00",
         "valorTotalEstimado": 2779054.44,
@@ -38,7 +40,7 @@ def valid_item(**overrides: object) -> dict[str, object]:
             "ufSigla": "SP",
             "municipioNome": "Aruja",
         },
-        "linkSistemaOrigem": "www.fidalgoleiloes.com.br",
+        "linkSistemaOrigem": "https://www.fidalgoleiloes.com.br/edital/415",
     }
     item.update(overrides)
     return item
@@ -67,13 +69,14 @@ def test_maps_valid_publication() -> None:
     assert process.state == "SP"
     assert process.locality == "Aruja"
     assert process.estimated_value == Decimal("2779054.44")
-    assert process.official_url is None
+    assert process.notice_number is None
+    assert process.official_url == "https://www.fidalgoleiloes.com.br/edital/415"
     assert process.first_captured_at == CAPTURED_AT
     assert process.last_captured_at == CAPTURED_AT
     assert process.screening_status is ScreeningStatus.RAW
 
 
-def test_official_url_is_not_api_endpoint_or_origin_or_frontend() -> None:
+def test_maps_documented_source_system_url_without_inventing_pncp_frontend() -> None:
     process = map_pncp_publication(
         valid_item(
             linkSistemaOrigem="https://origem.exemplo/edital",
@@ -82,8 +85,7 @@ def test_official_url_is_not_api_endpoint_or_origin_or_frontend() -> None:
         captured_at=CAPTURED_AT,
     )
 
-    assert process.official_url is None
-    assert process.official_url != "https://origem.exemplo/edital"
+    assert process.official_url == "https://origem.exemplo/edital"
     assert process.official_url != "https://processo.exemplo/1"
     assert process.official_url != (
         "https://pncp.gov.br/api/consulta/v1/orgaos/56901275000150/compras/2026/415"
@@ -91,6 +93,36 @@ def test_official_url_is_not_api_endpoint_or_origin_or_frontend() -> None:
     assert process.official_url != (
         "https://pncp.gov.br/app/editais/56901275000150/2026/415"
     )
+
+
+def test_purchase_number_is_not_silently_treated_as_notice_number() -> None:
+    process = map_pncp_publication(
+        valid_item(
+            numeroCompra="90008",
+            anoCompra=2025,
+            tipoInstrumentoConvocatorioNome="Edital",
+        ),
+        captured_at=CAPTURED_AT,
+    )
+
+    assert process.notice_number is None
+
+
+def test_absent_source_system_url_remains_none() -> None:
+    assert (
+        map_pncp_publication(
+            valid_item(linkSistemaOrigem=None), captured_at=CAPTURED_AT
+        ).official_url
+        is None
+    )
+
+
+def test_invalid_source_system_url_type_is_rejected() -> None:
+    with pytest.raises(PncpInvalidTypeError, match="linkSistemaOrigem"):
+        map_pncp_publication(
+            valid_item(linkSistemaOrigem={"url": "https://example.com"}),
+            captured_at=CAPTURED_AT,
+        )
 
 
 def test_generates_internal_uuid_when_not_provided() -> None:

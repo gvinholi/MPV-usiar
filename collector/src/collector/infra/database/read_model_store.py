@@ -2,7 +2,7 @@
 from contextlib import contextmanager
 from dataclasses import fields, replace
 from ipaddress import ip_address
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from sqlalchemy import text
 
@@ -25,15 +25,54 @@ from collector.application.read_model.pagination import Page, Pagination
 from .read_model_sql import BASE, LIST_COLUMNS, filter_predicate, queue_predicate, time_predicate
 
 
+_SENSITIVE_QUERY_NAMES = {
+    "access_token",
+    "api_key",
+    "apikey",
+    "auth",
+    "authorization",
+    "chave",
+    "code",
+    "credential",
+    "id_token",
+    "jwt",
+    "key",
+    "password",
+    "passwd",
+    "secret",
+    "session",
+    "sig",
+    "signature",
+    "token",
+    "x-amz-credential",
+    "x-amz-signature",
+    "x-goog-credential",
+    "x-goog-signature",
+}
+_SENSITIVE_QUERY_MARKERS = ("credential", "password", "secret", "signature", "token")
+
+
+def _is_sensitive_query_name(name: str) -> bool:
+    normalized = name.casefold().replace("-", "_")
+    return normalized in _SENSITIVE_QUERY_NAMES or any(
+        marker in normalized for marker in _SENSITIVE_QUERY_MARKERS
+    )
+
+
 def public_url(value):
-    """Only public HTTP(S) references; never storage keys or signed/query URLs."""
+    """Only public HTTP(S) references without credentials or sensitive query keys."""
     if not value:
         return None
     try:
+        if not isinstance(value, str) or value != value.strip():
+            return None
+        if len(value) > 2048 or any(ord(char) < 32 or ord(char) == 127 for char in value):
+            return None
         parsed = urlsplit(value)
         host = parsed.hostname
-        if parsed.scheme not in ('http', 'https') or not host or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        if parsed.scheme not in ('http', 'https') or not host or parsed.username or parsed.password or parsed.fragment:
             return None
+        parsed.port  # Validate malformed/out-of-range ports without connecting.
         if host == 'localhost' or '.' not in host or host.endswith(('.local', '.internal', '.localhost')):
             return None
         try:
@@ -41,8 +80,11 @@ def public_url(value):
                 return None
         except ValueError:
             pass
+        query = parse_qsl(parsed.query, keep_blank_values=True, max_num_fields=50)
+        if any(_is_sensitive_query_name(name) for name, _ in query):
+            return None
         return value
-    except ValueError:
+    except (ValueError, TypeError):
         return None
 
 

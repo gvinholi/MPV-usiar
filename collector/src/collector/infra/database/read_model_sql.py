@@ -36,6 +36,7 @@ WITH observations AS (
  o.source, identity.official_id, o.description, left(o.description,300) description_preview,
  o.organization_name, o.organization_cnpj, o.locality municipality_name, o.state uf, o.modality,
  o.estimated_value, o.published_at publication_at, o.closes_at proposal_deadline_at, o.official_url,
+ o.notice_number,
  o.captured_at latest_capture_at, o.id observation_id, o.round_id, o.created_at observation_persisted_at,
  r.id operational_resolution_id, r.state operational_state, r.reason_code operational_reason,
  r.resolved_at operational_resolved_at,

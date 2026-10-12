@@ -57,7 +57,52 @@ def test_alembic_upgrade_from_empty_database(postgres_url: str) -> None:
         assert "auth_users" in tables
         assert "auth_sessions" in tables
         assert "auth_audit_events" in tables
-        assert versions == ["0009_internal_auth"]
+        assert versions == ["0010_pncp_official_fields"]
+
+        command.downgrade(config, "0009_internal_auth")
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO collection_rounds "
+                    "(id,source,started_at,finished_at,status,pages_expected,"
+                    "pages_processed,pages_with_error,records_collected,"
+                    "unique_processes,candidates,selected,pending,discarded,"
+                    "documents_found,errors,created_at) VALUES "
+                    "(:round_id,'PNCP',now(),now(),'SUCCESS',0,0,0,0,0,0,0,0,0,0,0,now())"
+                ),
+                {"round_id": "11111111-1111-1111-1111-111111111111"},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO processes (id,created_at,updated_at) "
+                    "VALUES (:process_id,now(),now())"
+                ),
+                {"process_id": "22222222-2222-2222-2222-222222222222"},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO process_observations "
+                    "(id,process_id,round_id,source,official_url,created_at) VALUES "
+                    "(:observation_id,:process_id,:round_id,'PNCP',:url,now())"
+                ),
+                {
+                    "observation_id": "33333333-3333-3333-3333-333333333333",
+                    "process_id": "22222222-2222-2222-2222-222222222222",
+                    "round_id": "11111111-1111-1111-1111-111111111111",
+                    "url": "https://example.gov.br/contratacao/42",
+                },
+            )
+
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            migrated = connection.execute(
+                text(
+                    "SELECT notice_number, official_url "
+                    "FROM process_observations WHERE id=:id"
+                ),
+                {"id": "33333333-3333-3333-3333-333333333333"},
+            ).one()
+            assert migrated == (None, "https://example.gov.br/contratacao/42")
 
         command.downgrade(config, "0008_human_reviews")
         with engine.connect() as connection:

@@ -196,6 +196,22 @@ na página 1 e a deduplicação protege os processos. O agendamento das três ro
 diárias permanece fora deste comando e deve invocá-lo externamente em horários
 aprovados.
 
+### Campos oficiais para a aba UsiAr
+
+O snapshot da contratação preserva os campos oficiais usados pelo read model. No PNCP,
+`linkSistemaOrigem` alimenta `official_url` somente como referência pública do sistema
+de origem; endpoints técnicos da API e rotas inferidas do frontend PNCP não são usados.
+URLs com credenciais, hosts locais/privados, fragmentos ou parâmetros sensíveis são
+omitidas na resposta da API. Queries públicas necessárias, como `destino` e `compra`
+do Compras.gov.br, são preservadas.
+
+O OpenAPI e o Manual de Integração do PNCP expõem `numeroCompra`, `anoCompra` e
+`processo`, mas não um campo inequívoco `numeroEdital` ou `numeroAviso`. Por isso
+`notice_number` existe como campo nullable do contrato e permanece `null` para a fonte
+PNCP. O sistema não concatena `numeroCompra/anoCompra` nem usa `numeroControlePNCP` ou
+o processo administrativo como “N EDITAL”. O mapeamento completo e suas evidências
+estão em [docs/PNCP_FIELDS.md](docs/PNCP_FIELDS.md).
+
 ### Bootstrap da autenticação interna
 
 A fundação da autenticação própria mantém usuários, permissões, sessões opacas,

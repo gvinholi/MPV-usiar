@@ -158,6 +158,7 @@ class ProcessObservationRow(Base):
     state: Mapped[str | None] = mapped_column(Text)
     locality: Mapped[str | None] = mapped_column(Text)
     estimated_value: Mapped[Decimal | None] = mapped_column(Numeric)
+    notice_number: Mapped[str | None] = mapped_column(Text)
     official_url: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

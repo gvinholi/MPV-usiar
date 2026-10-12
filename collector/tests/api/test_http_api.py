@@ -26,7 +26,7 @@ ROUND_ID = UUID("33333333-3333-3333-3333-333333333333")
 def item():
     return OpportunityListItem(PROCESS_ID, "PNCP", "00509968000148/2026/3341",
         "Manutenção preventiva de climatização – São Paulo", "Órgão Público", None, "São Paulo", "SP", None,
-        Decimal("125000.50"), NOW, None, None, None, "CANDIDATE", "reason", NOW,
+        Decimal("125000.50"), NOW, None, "https://example.gov.br/edital/42", None, None, "CANDIDATE", "reason", NOW,
         HumanReviewStatus.UNREVIEWED, None, None, None, 0, False, False, NOW)
 
 
@@ -121,6 +121,8 @@ def test_list_contract_decimal_datetime_uuid_enum_null_unicode(client):
     assert result["human_review_status"] == "UNREVIEWED"
     assert result["human_decision"] is None
     assert result["description_preview"] == "Manutenção preventiva de climatização – São Paulo"
+    assert result["official_url"] == "https://example.gov.br/edital/42"
+    assert result["notice_number"] is None
     assert body["pagination"] == {"page": 1, "page_size": 25, "total_items": 1, "total_pages": 1}
 
 

@@ -53,7 +53,10 @@ def map_pncp_publication(
             estimated_value=parse_pncp_money(
                 item.get("valorTotalEstimado"), field="valorTotalEstimado"
             ),
-            official_url=None,
+            # O contrato PNCP não expõe numeroEdital/numeroAviso. numeroCompra
+            # tem outra semântica oficial e não é promovido silenciosamente.
+            notice_number=None,
+            official_url=_optional_text(item, "linkSistemaOrigem"),
             first_captured_at=captured_at,
             last_captured_at=captured_at,
             screening_status=ScreeningStatus.RAW,

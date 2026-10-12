@@ -27,6 +27,7 @@ class Process:
     state: str | None = None
     locality: str | None = None
     estimated_value: Decimal | None = None
+    notice_number: str | None = None
     official_url: str | None = None
     first_captured_at: datetime | None = None
     last_captured_at: datetime | None = None

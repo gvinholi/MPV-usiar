@@ -33,6 +33,7 @@ class OpportunityListItem:
     publication_at: datetime | None
     proposal_deadline_at: datetime | None
     official_url: str | None
+    notice_number: str | None
     operational_resolution_id: UUID | None
     operational_state: str | None
     operational_reason: str | None

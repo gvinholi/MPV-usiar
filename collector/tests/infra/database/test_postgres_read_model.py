@@ -46,7 +46,8 @@ def dataset(migrated_engine, db_session):
     review = RecordHumanReview(human_repo, clock=lambda: NOW)
     snapshots = [replace(process(f'READ-{i}', description=CANDIDATE_TEXT + f' {i}',
         estimated_value=Decimal(i)+Decimal('0.01'),last_captured_at=NOW+timedelta(seconds=i)),
-        official_url=None if i == 0 else 'https://pncp.gov.br/app/editais/example') for i in range(7)]
+        official_url=None if i == 0 else 'https://pncp.gov.br/app/editais/example',
+        notice_number='EDITAL-1/2026' if i == 1 else None) for i in range(7)]
     persist.persist(collection_result(*snapshots,started_at=NOW,ended_at=NOW+timedelta(minutes=1)))
     resolutions = []
     with factory() as session:
@@ -117,6 +118,7 @@ def test_pagination_sort_decimal_timezone_nullability(dataset):
     assert item.estimated_value == Decimal('0.01') and isinstance(item.estimated_value,Decimal)
     assert item.latest_capture_at.utcoffset() is not None
     assert item.official_url is None
+    assert item.notice_number is None
     assert item.human_decision is None
     assert item.documents_count == 0
 
@@ -387,6 +389,13 @@ def test_latest_observation_and_distinct_source_coverage(dataset):
     assert query.source_coverage()[0].unique_processes==7
     assert query.source_coverage()[0].records_collected==8
     assert query.list_opportunities(scope).total_items==7
+
+
+def test_official_fields_are_read_from_persisted_snapshot(dataset):
+    _,_,query,scope,snapshots,*_=dataset
+    item=query.get_opportunity(snapshots[1].id,scope).opportunity
+    assert item.notice_number=='EDITAL-1/2026'
+    assert item.official_url=='https://pncp.gov.br/app/editais/example'
 
 
 def test_all_queries_preserve_persisted_rows(dataset):

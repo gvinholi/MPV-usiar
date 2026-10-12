@@ -99,7 +99,13 @@ def test_same_process_new_round_keeps_history(
 def test_same_result_twice_does_not_duplicate(
     persist_service: PersistCollection, db_session: Session
 ) -> None:
-    result = collection_result(process("123"))
+    result = collection_result(
+        process(
+            "123",
+            notice_number="EDITAL-42/2026",
+            official_url="https://example.gov.br/contratacao/42",
+        )
+    )
     first = persist_service.persist(result)
     second = persist_service.persist(result)
 
@@ -108,6 +114,40 @@ def test_same_result_twice_does_not_duplicate(
     assert _counts(db_session)["collection_rounds"] == 1
     assert _counts(db_session)["process_observations"] == 1
     assert _counts(db_session)["source_identities"] == 1
+    fields = db_session.execute(
+        text("SELECT notice_number, official_url FROM process_observations")
+    ).one()
+    assert fields == ("EDITAL-42/2026", "https://example.gov.br/contratacao/42")
+
+
+def test_new_null_snapshot_does_not_overwrite_historical_official_fields(
+    persist_service: PersistCollection, db_session: Session
+) -> None:
+    first = process(
+        "123",
+        notice_number="EDITAL-42/2026",
+        official_url="https://example.gov.br/contratacao/42",
+    )
+    persist_service.persist(collection_result(first, round_id=uuid4()))
+    later = process(
+        "123",
+        process_id=uuid4(),
+        notice_number=None,
+        official_url=None,
+        last_captured_at=datetime(2026, 10, 5, 14, 0, tzinfo=UTC),
+    )
+    persist_service.persist(collection_result(later, round_id=uuid4()))
+
+    rows = db_session.execute(
+        text(
+            "SELECT notice_number, official_url FROM process_observations "
+            "ORDER BY captured_at"
+        )
+    ).all()
+    assert rows == [
+        ("EDITAL-42/2026", "https://example.gov.br/contratacao/42"),
+        (None, None),
+    ]
 
 
 def test_new_process(persist_service: PersistCollection, db_session: Session) -> None:

@@ -573,10 +573,10 @@ Decisões do adaptador `collector.infra.pncp.mapper`. Não substituem as seçõe
 
 * A tradução de um item `data[]` para `domain.Process` vive na fronteira PNCP (`map_pncp_publication`). O domínio não conhece nomes da API. O paginador continua devolvendo a representação externa.
 * Identidade oficial: `numeroControlePNCP` → `SourceIdentity(Source.PNCP, official_id)`. UUID interno é gerado por chamada (`uuid4`) ou recebido do chamador. Sem UUID determinístico e sem deduplicação.
-* Campos PNCP utilizados: `numeroControlePNCP`, `orgaoEntidade.cnpj`, `orgaoEntidade.razaoSocial`, `objetoCompra`, `modalidadeNome`, `dataPublicacaoPncp`, `dataEncerramentoProposta`, `unidadeOrgao.ufSigla`, `unidadeOrgao.municipioNome`, `valorTotalEstimado`. Demais campos permanecem fora do domínio.
+* Campos PNCP utilizados: `numeroControlePNCP`, `orgaoEntidade.cnpj`, `orgaoEntidade.razaoSocial`, `objetoCompra`, `modalidadeNome`, `dataPublicacaoPncp`, `dataEncerramentoProposta`, `unidadeOrgao.ufSigla`, `unidadeOrgao.municipioNome`, `valorTotalEstimado` e `linkSistemaOrigem`. Demais campos permanecem fora do domínio.
 * Ausência legítima vira `None`. Não se inventam textos como "Não informado".
 * Datas: o manual oficial declara `dataAberturaProposta` e `dataEncerramentoProposta` como horário de Brasília. As strings observadas não têm offset. Strings sem offset recebem UTC−03:00 (horário oficial de Brasília; sem horário de verão desde 2019), não porque a consulta tenha `uf=SP`. Offset explícito é preservado. `captured_at` é injetado, timezone-aware, e preenche primeira e última captura na primeira transformação. Sem pacote `tzdata`.
-* URL: endpoint da API (`/api/consulta/v1/orgaos/{cnpj}/compras/{ano}/{sequencial}`) ≠ página pública navegável. `linkSistemaOrigem` e `linkProcessoEletronico` também não são promovidos a `official_url`. O mapper deixa `official_url=None` até o commit de documentos/editais. Nenhuma rota de frontend (`/app/editais/...`) foi inferida. `build_pncp_api_resource_url` monta só o recurso técnico da API, sem alimentar o domínio.
+* URL: endpoint da API (`/api/consulta/v1/orgaos/{cnpj}/compras/{ano}/{sequencial}`) ≠ página pública navegável. `linkSistemaOrigem`, documentado pelo PNCP como página/portal do sistema de origem, alimenta `official_url`; `linkProcessoEletronico` não é fallback. Nenhuma rota de frontend (`/app/editais/...`) é inferida. `build_pncp_api_resource_url` monta só o recurso técnico da API, sem alimentar o domínio.
 * Valor estimado: `Decimal`, sem conversão via `float` como tipo intermediário inventado; números JSON já materializados em `float` usam `Decimal(str(value))`. Payload monetário inválido gera `PncpInvalidMoneyError`.
 * Erros de mapeamento: `PncpMissingFieldError`, `PncpInvalidTypeError`, `PncpInvalidDateError`, `PncpInvalidMoneyError`, `PncpInvalidIdentityError`. Não vazam `KeyError`/`ValueError`/`TypeError` como contrato.
 
@@ -656,7 +656,7 @@ Decisões de `collector.application.documents` e `collector.infra.pncp` (cliente
 * Resposta observada: lista JSON (não o envelope `{documentos: [...]}` do manual de integração). Cada item tem `sequencialDocumento`, `titulo`, `url`, `uri`, `tipoDocumentoId`, `tipoDocumentoNome`, `tipoDocumentoDescricao`, `dataPublicacaoPncp`, `statusAtivo`, `cnpj`, `anoCompra`, `sequencialCompra`.
 * `https://pncp.gov.br/pncp-api/v1/...` também responde, mas devolve URL com porta interna; o cliente usa `/api/pncp`.
 * Identidade documental: `Source.PNCP` + `{cnpj}/{ano}/{sequencial}/{sequencialDocumento}`. `sequencialDocumento` é único na contratação, não global. Título, nome de arquivo e URL **não** são identidade (a URL variou entre aliases).
-* `url` é a URL oficial do arquivo. A URL técnica do catálogo é o endpoint de metadados. A página navegável da contratação continua outro conceito. `Process.official_url` permanece `None`.
+* `url` é a URL oficial do arquivo. A URL técnica do catálogo é o endpoint de metadados. A referência pública da contratação continua outro conceito e pode vir de `linkSistemaOrigem` em `Process.official_url`.
 * Zero documentos = consulta `200` + lista vazia (sucesso). Compra inexistente = HTTP 404 (falha). Não confundir os dois. Lista vazia não foi observada na amostra de 10 contratações; o cliente trata `[]` como sucesso porque o contrato observado é uma lista.
 * Catálogo e coleta são operações separadas: `CatalogProcessDocuments.catalog(query)` não roda automaticamente após a triagem. A regra futura esperada (CANDIDATE/PENDING consultam; DISCARDED normalmente não) **não** está automatizada neste commit.
 * `CollectionRound.metrics.documents_found` continua sem integração. A métrica deste passo vive em `DocumentCatalogResult.documents_found` (documentos mapeados daquela consulta). O significado da métrica da rodada (únicos, observados ou processos com documento) ainda não foi definido.
@@ -808,7 +808,7 @@ Mesmo banco e schema dos commits anteriores. Sem event sourcing, CQRS distribuí
 
 **Perfis.** Consultas com screening/resolution/review exigem `ProfileScope` com exatamente um `profile_id` ou `profile_code`. Code é aceito quando identifica uma única versão; se houver várias, `AmbiguousProfileError` exige id. Perfil inexistente gera `ProfileNotFoundError`. Não há USIAR hard-coded nem escolha implícita de versão ativa. Processo sem avaliação no perfil continua na lista, com campos de decisão nulos; dados de coleta/documentos não são atributos de perfil. Rodadas, documentos e cobertura de fonte não recebem perfil porque são globais.
 
-**Estado atual.** Uma oportunidade por processo no perfil solicitado. Latest operational: `resolved_at DESC, created_at DESC, resolution_fingerprint DESC`, igual ao Commit 14. Latest human sobre essa resolução: `decided_at DESC, created_at DESC, sequence DESC`, igual ao Commit 15. Review histórica sem review vigente gera STALE e campos de decisão atuais nulos. A última review histórica aparece apenas no detalhe em campo separado. PENDING humano é REVIEWED. Filtros SELECTED usam exclusivamente a review vigente, nunca um histórico selecionado.
+**Estado atual.** Uma oportunidade por processo no perfil solicitado. Latest operational: `resolved_at DESC, created_at DESC, resolution_fingerprint DESC`, igual ao Commit 14. Latest human sobre essa resolução: `decided_at DESC, created_at DESC, sequence DESC`, igual ao Commit 15. Review histórica sem review vigente gera STALE e campos de decisão atuais nulos. A última review histórica aparece apenas no detalhe em campo separado. PENDING humano é REVIEWED. Filtros SELECTED usam exclusivamente a review vigente, nunca um histórico selecionado. A oportunidade também projeta `official_url` e `notice_number` do snapshot vigente; ambos permanecem nullable.
 
 Latest observation: `captured_at DESC NULLS LAST, created_at DESC, id DESC`. A lista mostra a identidade da fonte da observação; se houver múltiplos official_ids na mesma fonte, escolhe o menor lexicalmente. Detalhe lista todas as identidades. Processo sem observação tem campos de observação nulos, sem criar description/deadline/valor/URL. `publication_at` projeta `published_at`; `proposal_deadline_at` projeta `closes_at`; `uf` projeta `state`; `municipality_name` projeta `locality`. Não existe título separado de processo no schema: busca e preview usam description. Não foi inventado título.
 
@@ -865,7 +865,7 @@ Eventos de decisões respeitam o perfil; coleta/documentos são compartilhados. 
 
 **Fila humana.** DashboardReviewQueueItem combina OpportunityListItem com ReviewQueueItem, sem alterar o DTO antigo. A política pura `in_queue` do Commit 15 é compilada para predicados SQL por enumeração finita de estados possíveis. Paridade testada contra a fila antiga. Todos os filtros/paginação ocorrem em SQL. NEEDS_REVIEW exclui descarte automático por padrão, permite inclusão explícita; STALE_REVIEW permanece consultável; queues SELECTED/HUMAN_PENDING/HUMAN_DISCARDED usam review vigente. O sort padrão do novo contrato é captura recente, não ranking comercial.
 
-**Segurança e not found.** OpportunityNotFoundError para process_id/source identity ausente, CollectionRoundNotFoundError para rodada ausente. Lookup source + official_id é parametrizado. DTOs não contêm DATABASE_URL, credenciais, headers, storage_key, requested/final download URLs ou erros brutos. URLs de referência persistidas passam por filtro conservador HTTP(S): rejeita credenciais embutidas, query/fragment, hosts locais/internos conhecidos e IPs não globais. URLs com query legítima também podem ser omitidas; não há resolução DNS/requisição na leitura. Source path de evidência/member é o identificador persistido do member, não storage key.
+**Segurança e not found.** OpportunityNotFoundError para process_id/source identity ausente, CollectionRoundNotFoundError para rodada ausente. Lookup source + official_id é parametrizado. DTOs não contêm DATABASE_URL, credenciais, headers, storage_key, requested/final download URLs ou erros brutos. URLs de referência persistidas passam por filtro conservador HTTP(S): rejeita credenciais embutidas, fragmentos, parâmetros sensíveis, hosts locais/internos conhecidos e IPs não globais. Queries públicas sem chaves sensíveis são preservadas; não há resolução DNS/requisição na leitura. Source path de evidência/member é o identificador persistido do member, não storage key.
 
 **Performance e limites.** Lista/fila usam window functions, subqueries/aggregações e projeção de apenas 300 caracteres da descrição; nenhuma consulta individual por processo. Medição: 4 statements (SET READ ONLY + perfil + count + página), tanto com 7 como com 30 processos; 3 são SELECTs. Documentos buscam extrações e members em lote para a página. Detalhe usa queries especializadas por seção, sem consulta por página/evidência. Contagens, detalhes e summaries compartilham snapshot consistente; teste concorrente confirma que uma inserção durante a leitura só aparece no próximo snapshot. Offset e ILIKE são adequados ao piloto; não há promessa de latência em milhões de linhas, FTS ou índices novos.
 
@@ -1416,3 +1416,29 @@ Executar novamente o comando cria outra rodada e preserva as anteriores, bem com
 revisões humanas. Não há checkpoint persistente de página: uma nova execução começa na
 página 1. Também não há scheduler neste componente; três rodadas diárias devem ser
 disparadas por infraestrutura externa em commit próprio.
+
+---
+
+## 46. Campos oficiais PNCP para a aba UsiAr
+
+O Commit 26 acrescenta `notice_number` nullable aos snapshots
+`process_observations`, ao domínio e aos contratos existentes de oportunidades. A
+migration `0010_pncp_official_fields` é append-only; registros anteriores recebem
+`null`, sem reescrita de snapshots, triagens, resoluções ou reviews.
+
+O contrato oficial observado do PNCP possui `numeroCompra`, `anoCompra`, `processo` e
+`tipoInstrumentoConvocatorioNome`, mas não possui `numeroEdital` ou `numeroAviso`.
+Embora o portal possa apresentar visualmente “Edital nº {numeroCompra}/{anoCompra}”, o
+Manual define `numeroCompra` como número da contratação no sistema de origem. Para não
+alterar essa semântica, o mapper PNCP mantém `notice_number=None`: não concatena campos,
+não copia `numeroControlePNCP` e não reutiliza o processo administrativo.
+
+`linkSistemaOrigem` é documentado como URL da página/portal do sistema de origem para a
+contratação e passa a alimentar `Process.official_url`. `linkProcessoEletronico` não é
+usado como fallback. Rotas técnicas de API e rotas de frontend PNCP não são promovidas
+nem construídas. A leitura expõe apenas HTTP(S) público sem userinfo, fragmento, host
+local/privado ou parâmetros com nomes sensíveis; queries operacionais não sensíveis são
+mantidas porque são necessárias em links públicos reais do Compras.gov.br.
+
+O detalhamento campo a campo da aba UsiAr, fontes e limitações está em
+`docs/PNCP_FIELDS.md`.

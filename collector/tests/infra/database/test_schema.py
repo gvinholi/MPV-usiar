@@ -85,3 +85,14 @@ def test_foreign_keys_exist(db_session: Session) -> None:
     assert "fk_auth_user_permissions_permission_code_auth_permissions" in names
     assert "fk_auth_sessions_user_id_auth_users" in names
     assert "fk_auth_audit_events_subject_user_id_auth_users" in names
+
+
+def test_official_notice_number_is_nullable(db_session: Session) -> None:
+    row = db_session.execute(
+        text(
+            "SELECT is_nullable, data_type FROM information_schema.columns "
+            "WHERE table_schema='public' AND table_name='process_observations' "
+            "AND column_name='notice_number'"
+        )
+    ).one()
+    assert row == ("YES", "text")
