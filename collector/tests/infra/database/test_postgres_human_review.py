@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from collector.application import (
     OperationalResolver, PersistOperationalResolution, PersistScreening,
-    ScreeningEngine, usiar_v1, EvaluateDocumentScreening, PersistDocumentScreening,
+    ScreeningEngine, usiar_v1, usiar_v2, EvaluateDocumentScreening, PersistDocumentScreening,
 )
 from collector.application.human_review import (
     HumanReviewDecision as D, HumanReviewReason as R, HumanReviewStatus as S,
@@ -199,9 +199,8 @@ def test_resolution_committed_between_check_and_insert_is_visible_as_stale(setup
 
 def test_profile_isolation(setup):
     factory, repo, operational, a = setup
-    profile = replace(usiar_v1(), id=uuid4(), version="human-review-test")
     screening = PersistScreening(SqlAlchemyScreeningRepository(factory))
-    profile = screening.persist_profile(profile)
+    profile = screening.persist_profile(usiar_v2())
     with factory() as session:
         observation = session.execute(text("SELECT id FROM process_observations WHERE process_id = :id"), {"id": a.process_id}).scalar_one()
     initial = ScreeningEngine().evaluate(profile, description="Manutencao preventiva de aparelhos de ar condicionado.",

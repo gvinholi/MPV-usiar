@@ -1,0 +1,162 @@
+[
+  {
+    "case_id": "pncp-sp-split-maintenance",
+    "kind": "real",
+    "official_id": "46374500000194-1-008512/2026",
+    "source_url": "https://pncp.gov.br/app/editais?pagina=1&q=adolfo+lutz&status=todos",
+    "description": "Serviços de manutenção corretiva em aparelho Split de ar condicionado",
+    "expected_v2": "CANDIDATE"
+  },
+  {
+    "case_id": "pncp-sp-maintenance-installation",
+    "kind": "real",
+    "official_id": "00402552000126-1-000462/2026",
+    "source_url": "https://pncp.gov.br/app/editais?modalidades=6%7C7&orgaos=47201&pagina=1&q=IPEN&status=todos&ufs=SP",
+    "description": "Contratação de serviços de manutenção preventiva e corretiva e instalação nos diversos sistemas de ar condicionado central e aparelhos de ar condicionado de janela da CNEN/IPEN-SP.",
+    "expected_v2": "PENDING"
+  },
+  {
+    "case_id": "pncp-sp-duct-cleaning",
+    "kind": "real",
+    "official_id": "00091652000189-1-000404/2026",
+    "source_url": "https://pncp.gov.br/app/editais?modalidades=9%7C8&pagina=1&q=COMPANHIA+DE+PESQUISA+DE+RECURSOS+MINERAIS&status=todos",
+    "description": "Contratação de empresa para realização do serviço anual de limpeza e Higienização de 190 metros lineares de Dutos do Ar Condicionado Central e análise da qualidade do ar após a limpeza da Superintendência Regional de São Paulo da CPRM",
+    "expected_v2": "CANDIDATE"
+  },
+  {
+    "case_id": "pncp-vehicle-air-conditioning",
+    "kind": "real",
+    "official_id": "15088800000183-1-000139/2026",
+    "source_url": "https://pncp.gov.br/app/editais?municipios=2159&pagina=1&q=&status-recebendo_pro-=",
+    "description": "Credenciamento de empresas para manutenção preventiva e corretiva da frota de veículos, abrangendo manutenção de ar-condicionado veicular.",
+    "expected_v2": "DISCARDED"
+  },
+  {
+    "case_id": "pncp-installation-materials",
+    "kind": "real",
+    "official_id": "05055128000176-1-000108/2026",
+    "source_url": "https://pncp.gov.br/app/editais?municipios=1393&orgaos=54284&pagina=1&q=2026&status=todos",
+    "description": "Aquisição de materiais destinados à instalação de aparelhos de ar-condicionado tipo split, visando atender às demandas de climatização das unidades.",
+    "expected_v2": "DISCARDED"
+  },
+  {
+    "case_id": "pncp-equipment-purchase",
+    "kind": "real",
+    "official_id": "25064080000170-1-000097/2026",
+    "source_url": "https://pncp.gov.br/app/editais?pagina=1&status=recebendo_proposta&tam_pagina=100",
+    "description": "Registro de preço para eventual e futura contratação de empresa para fornecimento de aparelhos de ar-condicionado, visando atender às necessidades de climatização das unidades de ensino.",
+    "expected_v2": "DISCARDED"
+  },
+  {
+    "case_id": "pncp-pmoc-with-parts",
+    "kind": "real",
+    "official_id": "76206499000150-1-000179/2026",
+    "source_url": "https://pncp.gov.br/app/editais?q=s%C3%A3o+miguel+do+iguacu&status=recebendo_proposta",
+    "description": "Contratação de empresa especializada para a prestação continuada de serviços de manutenção preventiva e corretiva do sistema de climatização central, com execução e atualização do Plano de Manutenção, Operação e Controle - PMOC, atendimento técnico emergencial e fornecimento, sob demanda, de peças e componentes.",
+    "expected_v2": "PENDING"
+  },
+  {
+    "case_id": "pncp-chiller-parts-maintenance",
+    "kind": "real",
+    "official_id": "00394460000141-1-000668/2026",
+    "source_url": "https://pncp.gov.br/app/editais?pagina=1&q=00394460000141&status=todos",
+    "description": "Aquisição de peças e materiais necessários à execução de serviços de manutenção corretiva emergencial em uma unidade resfriadora de líquido (chiller), integrante do sistema de ar-condicionado central.",
+    "expected_v2": "PENDING"
+  },
+  {
+    "case_id": "pncp-unrelated-reagents",
+    "kind": "real",
+    "official_id": "46374500000194-1-008511/2026",
+    "source_url": "https://pncp.gov.br/app/editais?pagina=1&q=adolfo+lutz&status=todos",
+    "description": "Aquisição-CatIAL: Reagente químico-Sal e reagente; Solvente + 13F e 13G",
+    "expected_v2": "DISCARDED"
+  },
+  {
+    "case_id": "synthetic-context-distance",
+    "kind": "synthetic",
+    "official_id": null,
+    "source_url": null,
+    "description": "Manutenção predial e aquisição de aparelhos de ar-condicionado",
+    "expected_v2": "DISCARDED"
+  },
+  {
+    "case_id": "synthetic-maintenance-installation",
+    "kind": "synthetic",
+    "official_id": null,
+    "source_url": null,
+    "description": "Manutenção e instalação de aparelhos de ar condicionado.",
+    "expected_v2": "PENDING"
+  },
+  {
+    "case_id": "synthetic-refrigeration-ambiguous",
+    "kind": "synthetic",
+    "official_id": null,
+    "source_url": null,
+    "description": "Manutenção preventiva de equipamentos de refrigeração.",
+    "expected_v2": "PENDING"
+  },
+  {
+    "case_id": "synthetic-hvac-ambiguous",
+    "kind": "synthetic",
+    "official_id": null,
+    "source_url": null,
+    "description": "Manutenção preventiva HVAC.",
+    "expected_v2": "PENDING"
+  },
+  {
+    "case_id": "synthetic-hvac-explicit",
+    "kind": "synthetic",
+    "official_id": null,
+    "source_url": null,
+    "description": "Manutenção preventiva do sistema HVAC de climatização.",
+    "expected_v2": "CANDIDATE"
+  },
+  {
+    "case_id": "synthetic-pmoc",
+    "kind": "synthetic",
+    "official_id": null,
+    "source_url": null,
+    "description": "Elaboração, execução e atualização do PMOC.",
+    "expected_v2": "CANDIDATE"
+  },
+  {
+    "case_id": "synthetic-central-system",
+    "kind": "synthetic",
+    "official_id": null,
+    "source_url": null,
+    "description": "Manutenção corretiva de chillers do sistema central de climatização.",
+    "expected_v2": "CANDIDATE"
+  },
+  {
+    "case_id": "synthetic-sanitization-accents",
+    "kind": "synthetic",
+    "official_id": null,
+    "source_url": null,
+    "description": "HIGIENIZACAO e desinfeccao de evaporadoras de ar condicionado.",
+    "expected_v2": "CANDIDATE"
+  },
+  {
+    "case_id": "synthetic-duct-cleaning",
+    "kind": "synthetic",
+    "official_id": null,
+    "source_url": null,
+    "description": "Limpeza e desinfecção dos dutos de ar-condicionado.",
+    "expected_v2": "CANDIDATE"
+  },
+  {
+    "case_id": "synthetic-split-unrelated",
+    "kind": "synthetic",
+    "official_id": null,
+    "source_url": null,
+    "description": "Serviço de split de pagamentos e conciliação financeira.",
+    "expected_v2": "DISCARDED"
+  },
+  {
+    "case_id": "synthetic-empty",
+    "kind": "synthetic",
+    "official_id": null,
+    "source_url": null,
+    "description": "",
+    "expected_v2": "PENDING"
+  }
+]

@@ -155,7 +155,7 @@ docker compose down
 ## Rodada operacional PNCP
 
 Com o PostgreSQL iniciado e as migrations aplicadas, uma rodada completa coleta o
-PNCP, persiste processos e observações, aplica o perfil `USIAR/v1`, cria a resolução
+PNCP, persiste processos e observações, aplica um perfil USIAR explícito, cria a resolução
 operacional inicial e atualiza as métricas da própria rodada:
 
 ```powershell
@@ -166,6 +166,7 @@ python -m collector.cli.collect run `
   --end-date 2026-10-10 `
   --uf SP `
   --modality 6 `
+  --profile USIAR/v2 `
   --max-pages 2 `
   --page-size 10
 ```
@@ -174,8 +175,9 @@ Use somente códigos de modalidade confirmados no contrato vigente do PNCP. Repi
 `--modality` para consultar mais de uma modalidade. `--uf` é obrigatório para impedir
 uma coleta nacional acidental; ele filtra a UF informada pela publicação e não comprova,
 por si só, o local de execução do serviço. `--max-pages` é um limite explícito de
-segurança por modalidade (padrão 200), não um modo silencioso de teste. O único perfil
-aceito neste runner é `USIAR/v1`.
+segurança por modalidade (padrão 200), não um modo silencioso de teste. O runner aceita
+`USIAR/v1` e `USIAR/v2`; o padrão continua sendo `USIAR/v1` para impedir migração
+silenciosa. Use `--profile USIAR/v2` em cada rodada que deva aplicar a nova triagem.
 
 A última linha de sucesso é JSON e informa `round_id`, status, modalidades completas e
 incompletas, registros recebidos, processos únicos, criações, contagens de
@@ -195,6 +197,38 @@ checkpoint entre execuções: após uma interrupção, um novo comando reinicia 
 na página 1 e a deduplicação protege os processos. O agendamento das três rodadas
 diárias permanece fora deste comando e deve invocá-lo externamente em horários
 aprovados.
+
+### Triagem contextual USIAR/v2
+
+`USIAR/v1` permanece imutável e combina categorias encontradas em toda a descrição.
+`USIAR/v2` associa serviço e contexto dentro da mesma cláusula por distância semântica:
+conectores, números e unidades de medida não aumentam a distância, mas palavras de outro
+escopo impedem a associação automática. Assim, “manutenção predial e aquisição de
+aparelhos de ar-condicionado” é compra isolada, não manutenção de climatização.
+
+No v2, manutenção preventiva/corretiva, PMOC, higienização e limpeza de dutos com
+contexto comprovado são `CANDIDATE`. Manutenção com instalação, fornecimento ou peças,
+contexto incompleto e refrigeração/HVAC sem vínculo explícito são `PENDING`. Instalação,
+compra ou peças isoladas e climatização veicular são `DISCARDED`. Valor, modalidade,
+município, distância, prazo, equipe e capacidade técnica não participam da decisão.
+Os reason codes existentes são preservados; `EXCLUDED_CONTEXT` identifica somente um
+contexto explicitamente fora do escopo predial. As evidências continuam registrando
+categoria, termo configurado, campo e texto casado.
+
+Depois que v1 e v2 forem persistidos, `API_PROFILE_CODE=USIAR` se torna ambíguo por
+design. Para mudar a dashboard de forma explícita, deixe `API_PROFILE_CODE` vazio e
+configure no servidor Next.js:
+
+```powershell
+$env:API_PROFILE_ID = "42227c23-f6ea-5a43-b640-56ed6eb6981c"
+$env:API_PROFILE_CODE = ""
+```
+
+O UUID acima é a identidade determinística de `USIAR/v2`. A troca deve ocorrer somente
+após uma rodada v2 ter persistido o perfil e suas avaliações. O corpus versionado está
+em `collector/tests/application/screening/usiar_v2_corpus.json`; registros reais têm
+`official_id` e URL de origem, enquanto exemplos complementares são marcados como
+`synthetic`.
 
 ### Campos oficiais para a aba UsiAr
 

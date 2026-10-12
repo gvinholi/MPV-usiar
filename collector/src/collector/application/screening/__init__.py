@@ -11,7 +11,12 @@ from collector.application.screening.persist import (
 )
 from collector.application.screening.ports import ScreeningRepository
 from collector.application.screening.profile import ScreeningProfile
-from collector.application.screening.profiles import USIAR_V1_ID, usiar_v1
+from collector.application.screening.profiles import (
+    USIAR_V1_ID,
+    USIAR_V2_ID,
+    usiar_v1,
+    usiar_v2,
+)
 from collector.application.screening.reasons import ReasonCode
 from collector.application.screening.results import (
     ENGINE_VERSION,
@@ -35,7 +40,9 @@ __all__ = [
     "ScreeningRepository",
     "ScreeningSummary",
     "USIAR_V1_ID",
+    "USIAR_V2_ID",
     "decide",
     "summarize",
     "usiar_v1",
+    "usiar_v2",
 ]

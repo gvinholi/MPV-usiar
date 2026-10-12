@@ -636,13 +636,14 @@ Decisões de `collector.application.persistence` e `collector.infra.database`. N
 Decisões de `collector.application.screening`. Não substituem as seções anteriores.
 
 * Fluxo: coleta → consolidação → persistência → observação → avaliação por perfil. Coleta e triagem permanecem operações separadas. O motor não executa SQL.
-* USIAR é o primeiro `ScreeningProfile` (`USIAR/v1`). Termos ficam na configuração do perfil, não no algoritmo. Outro perfil reutiliza o mesmo motor.
+* USIAR possui perfis imutáveis e coexistentes (`USIAR/v1` e `USIAR/v2`). Termos e parâmetros de associação ficam na configuração versionada, não em seleção implícita do motor.
 * O motor é determinístico, explicável e sem IA, embeddings, fuzzy matching ou análise de PDF/edital. Analisa só `description` do snapshot. Descrição vazia → `PENDING / EMPTY_DESCRIPTION`.
 * Normalização: caixa, acentos, hífen, barra e pontuação simples; casamento por tokens consecutivos, sem substring dentro de outra palavra.
 * Estados automáticos possíveis: `CANDIDATE`, `PENDING`, `DISCARDED`. O motor não atribui `SELECTED` nem `CONFIRMED`.
 * O estado comercial pertence à **avaliação** (`screening_evaluations`), não ao processo persistente. Um processo pode ser descartado para USIAR v1 e reavaliado em v2 ou em outro perfil. Avaliações antigas não são sobrescritas.
 * Precedência centralizada em `decide()`: serviço relevante (contexto HVAC + manutenção/higienização) → `CANDIDATE`; o mesmo com instalação ou compra/peças → `PENDING` (misto, sem descarte); só instalação, só peças ou só compra em contexto HVAC → `DISCARDED` isolado (peças prevalecem sobre “aquisição/fornecimento” genérico); só contexto HVAC, ou serviço sem contexto HVAC mas com instalação/compra/peças → `PENDING` ambíguo; nenhum sinal do perfil → `DISCARDED / NO_RELEVANT_SCOPE`. Valor, município, modalidade e prazo não entram na decisão.
 * Reason codes estáveis separados do texto humano. Evidências em tabela filha (`screening_evidence`): categoria, termo configurado, campo e texto casado.
+* `USIAR/v2` ativa associação contextual por perfil. Cada cláusula delimitada por ponto, ponto e vírgula, dois-pontos ou quebra de linha é avaliada separadamente. A distância semântica ignora conectores, números e unidades de medida. Serviço e contexto precisam estar diretamente próximos; exclusões da mesma cláusula são preservadas quando o serviço relevante já foi comprovado. `ambiguous_context` mantém refrigeração e HVAC isolado em `PENDING`; `excluded_context` descarta climatização veicular com `EXCLUDED_CONTEXT`.
 * Persistência: `screening_profiles` com `UNIQUE(code, version)` e JSONB da configuração; `screening_evaluations` com `UNIQUE(observation_id, profile_id, engine_version)`; mesma observação + nova versão do perfil cria nova avaliação.
 * Métricas `candidates`/`pending`/`discarded` da rodada **não** são atualizadas neste commit. Rodadas já persistidas permanecem históricas. Integração futura deve calcular esses contadores a partir das avaliações da rodada/perfil, sem reescrever a rodada em silêncio.
 
@@ -1380,7 +1381,7 @@ CLI:
 
 ```text
 PncpClient -> PublicationPaginator -> CollectionOrchestrator
-           -> PersistCollection -> ScreeningEngine (USIAR/v1)
+           -> PersistCollection -> ScreeningEngine (USIAR/v1 ou USIAR/v2)
            -> PersistScreening -> OperationalResolver
            -> PersistOperationalResolution -> métricas da rodada
 ```
@@ -1394,7 +1395,8 @@ sem simular aquisição ou análise documental.
 
 A entrada operacional é `python -m collector.cli.collect run`. Datas inicial e final,
 UF e pelo menos uma modalidade são obrigatórias; modalidade pode ser repetida. O
-perfil é restrito a `USIAR/v1`. `--max-pages` limita cada modalidade e `--page-size`
+perfil é selecionado explicitamente entre `USIAR/v1` e `USIAR/v2`; a omissão mantém
+`USIAR/v1` por compatibilidade. `--max-pages` limita cada modalidade e `--page-size`
 controla o tamanho solicitado ao PNCP. A CLI exige `DATABASE_URL`, usa os adaptadores
 reais e emite eventos JSON de início, fim de coleta e fim operacional. Falhas expõem
 somente código e tipo sanitizados.
@@ -1442,3 +1444,49 @@ mantidas porque são necessárias em links públicos reais do Compras.gov.br.
 
 O detalhamento campo a campo da aba UsiAr, fontes e limitações está em
 `docs/PNCP_FIELDS.md`.
+
+---
+
+## 47. Triagem especializada USIAR/v2
+
+O Commit 27 acrescenta `USIAR/v2` com UUID determinístico
+`42227c23-f6ea-5a43-b640-56ed6eb6981c`. `USIAR/v1`, seu UUID e seu JSON de
+configuração permanecem idênticos. Não há migration: os parâmetros novos vivem no
+JSONB versionado de `screening_profiles`, e só aparecem na configuração v2.
+
+**Associação contextual.** O v2 separa cláusulas e associa contexto, serviço e
+exclusões por distância semântica configurada. Artigos, preposições, conjunções,
+números e unidades lineares são ignorados na contagem. Termos independentes não são
+combinados entre cláusulas. Uma exclusão próxima pode encadear um serviço ao contexto;
+quando serviço contextual já existe, instalação, compra ou peças na mesma cláusula
+mantêm o resultado conservador `PENDING`.
+
+**Decisão.** Manutenção preventiva/corretiva, PMOC, higienização, desinfecção e limpeza
+de dutos associadas a ar-condicionado, climatização, split/multi-split, VRF/VRV,
+evaporadoras, condensadoras, chillers ou sistemas centrais são `CANDIDATE`. Escopo
+misto, descrição incompleta e refrigeração/HVAC sem comprovação explícita são
+`PENDING`. Instalação, compra ou peças isoladas são `DISCARDED`. Ar-condicionado
+veicular é `DISCARDED / EXCLUDED_CONTEXT`. Nenhuma regra usa valor, modalidade,
+localidade, prazo, equipe, capacidade ou complexidade.
+
+**Compatibilidade e seleção.** A unicidade continua sendo observação + profile_id +
+engine_version. Avaliações e resoluções novas não reescrevem v1 nem reviews humanos.
+O runner exige `--profile USIAR/v2` para optar pela nova versão e continua usando v1
+quando a opção é omitida. Depois que ambas as versões existem, `profile_code=USIAR` é
+deliberadamente ambíguo; a API/dashboard deve usar `API_PROFILE_ID` com o UUID de v2 e
+deixar `API_PROFILE_CODE` vazio. A dashboard não migra automaticamente.
+
+**Corpus e limites.** O corpus versionado mistura registros oficiais PNCP, com ID e
+URL de origem, e casos sintéticos rotulados. Na amostra real controlada de nove objetos,
+v1 produziu 3 CANDIDATE, 3 PENDING e 3 DISCARDED; v2 produziu 2 CANDIDATE, 3 PENDING e
+4 DISCARDED. A principal correção observada foi climatização veicular; descrições de
+chiller com relação distante permaneceram PENDING. A amostra é pequena e direcionada,
+portanto demonstra comportamento, não uma estimativa estatística de precisão.
+
+Uma segunda validação não direcionada consultou somente 08/10/2026, UF SP,
+modalidades 6 e 8, página 1 e 50 itens por modalidade. Nos 100 objetos, v1 resultou em
+91 DISCARDED e 9 PENDING; v2 resultou em 98 DISCARDED e 2 PENDING. As sete mudanças
+eram objetos sem climatização (veículos, implementos agrícolas, limpeza comum,
+instalações elétricas e frete), antes preservados como ambíguos por termos genéricos.
+Não houve CANDIDATE nessas páginas; portanto essa amostra não demonstra recuperação de
+falso negativo nem mede recall. Nenhum dado da consulta foi persistido.

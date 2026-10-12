@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from collector.application import (
     EvaluateDocumentScreening, OperationalResolver, PersistCollection, PersistDocumentScreening,
-    PersistOperationalResolution, PersistScreening, ScreeningEngine, usiar_v1,
+    PersistOperationalResolution, PersistScreening, ScreeningEngine, usiar_v1, usiar_v2,
 )
 from collector.application.human_review import (
     HumanReviewDecision as D, HumanReviewReason as HR, HumanReviewStatus as HS,
@@ -219,8 +219,9 @@ def test_profile_isolation(dataset):
     assert query.get_opportunity(snapshots[3].id,other).current_human_review.decision == D.DISCARDED
     assert query.get_opportunity(snapshots[3].id,scope).current_human_review.decision == D.SELECTED
     assert query.dashboard_summary(other).current_snapshot.human_discarded == 1
-    PersistScreening(SqlAlchemyScreeningRepository(factory)).persist_profile(replace(usiar_v1(),id=uuid4(),version='another'))
+    v2 = PersistScreening(SqlAlchemyScreeningRepository(factory)).persist_profile(usiar_v2())
     with pytest.raises(AmbiguousProfileError): query.list_opportunities(ProfileScope(profile_code=usiar_v1().code))
+    assert query.dashboard_summary(ProfileScope(profile_id=v2.id)).profile_id == v2.id
     with pytest.raises(ProfileNotFoundError): query.list_opportunities(ProfileScope(profile_id=uuid4()))
     assert query.list_opportunities(scope).total_items == 7
 

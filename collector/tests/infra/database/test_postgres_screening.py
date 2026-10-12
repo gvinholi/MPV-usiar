@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from uuid import uuid4
-
 import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -14,8 +12,8 @@ from collector.application import (
     PersistScreening,
     ScreeningEngine,
     usiar_v1,
+    usiar_v2,
 )
-from collector.application.screening.profile import ScreeningProfile
 from collector.infra.database import SqlAlchemyScreeningRepository
 from tests.application.persistence.factories import collection_result, process
 
@@ -91,6 +89,19 @@ def test_insert_usiar_v1_and_unique_code_version(
     db_session.rollback()
 
 
+def test_insert_usiar_v2_preserves_contextual_configuration(
+    screening_service: PersistScreening,
+) -> None:
+    first = screening_service.persist_profile(usiar_v2())
+    second = screening_service.persist_profile(usiar_v2())
+
+    assert first.id == second.id
+    assert second.identity == "USIAR/v2"
+    assert second.association_window_tokens == 1
+    assert "refrigeração" in second.ambiguous_context_terms
+    assert "ar condicionado veicular" in second.excluded_context_terms
+
+
 def test_persist_evaluation_and_evidence(
     persist_service: PersistCollection,
     screening_service: PersistScreening,
@@ -149,20 +160,7 @@ def test_same_observation_new_version_keeps_history(
         persist_service, db_session, "Manutenção preventiva de chillers."
     )
     v1 = screening_service.persist_profile(usiar_v1())
-    v2 = screening_service.persist_profile(
-        ScreeningProfile(
-            id=uuid4(),
-            code="USIAR",
-            name=v1.name,
-            version="v2",
-            context_terms=v1.context_terms,
-            maintenance_terms=v1.maintenance_terms,
-            sanitization_terms=v1.sanitization_terms,
-            installation_terms=v1.installation_terms,
-            purchase_terms=v1.purchase_terms,
-            parts_terms=v1.parts_terms,
-        )
-    )
+    v2 = screening_service.persist_profile(usiar_v2())
     first = ScreeningEngine().evaluate(
         v1,
         description=snapshot.description,

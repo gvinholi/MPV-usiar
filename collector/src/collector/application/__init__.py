@@ -112,8 +112,10 @@ from collector.application.screening import (
     ScreeningRepository,
     ScreeningSummary,
     USIAR_V1_ID,
+    USIAR_V2_ID,
     summarize,
     usiar_v1,
+    usiar_v2,
 )
 from collector.application.resolution import (
     RESOLVER_ENGINE_VERSION,
@@ -260,6 +262,7 @@ __all__ = [
     "TextExtractionPolicy",
     "TextExtractionRepository",
     "USIAR_V1_ID",
+    "USIAR_V2_ID",
     "PublicationCollection",
     "PublicationMapper",
     "PublicationMappingError",
@@ -274,4 +277,5 @@ __all__ = [
     "resolve_identities",
     "summarize",
     "usiar_v1",
+    "usiar_v2",
 ]

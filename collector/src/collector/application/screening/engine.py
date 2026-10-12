@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -49,6 +51,9 @@ _REASON_TEXT = {
         "O objeto é fornecimento de peças ou componentes de climatização, "
         "sem manutenção ou higienização relevante."
     ),
+    ReasonCode.EXCLUDED_CONTEXT: (
+        "O contexto encontrado é explicitamente externo ao escopo de climatização predial."
+    ),
     ReasonCode.AMBIGUOUS_RELEVANT_CONTEXT: (
         "Há sinais relacionados ao perfil, mas o serviço não é suficientemente "
         "claro para decisão segura."
@@ -56,10 +61,44 @@ _REASON_TEXT = {
     ReasonCode.NO_RELEVANT_SCOPE: (
         "O perfil foi aplicado e não encontrou evidência de aderência."
     ),
-    ReasonCode.EMPTY_DESCRIPTION: (
-        "A observação não possui descrição para avaliar."
-    ),
+    ReasonCode.EMPTY_DESCRIPTION: ("A observação não possui descrição para avaliar."),
 }
+
+_CLAUSE_SEPARATOR = re.compile(r"[.;:\n]+")
+_ASSOCIATION_FILLERS = frozenset(
+    {
+        "a",
+        "as",
+        "com",
+        "da",
+        "das",
+        "de",
+        "do",
+        "dos",
+        "e",
+        "em",
+        "linear",
+        "lineares",
+        "metro",
+        "metros",
+        "na",
+        "nas",
+        "no",
+        "nos",
+        "o",
+        "os",
+        "para",
+        "por",
+    }
+)
+
+
+@dataclass(frozen=True)
+class _Match:
+    category: str
+    configured_term: str
+    start: int
+    end: int
 
 
 class ScreeningEngine:
@@ -83,8 +122,11 @@ class ScreeningEngine:
             reason = ReasonCode.EMPTY_DESCRIPTION
             evidence: tuple[ScreeningEvidence, ...] = ()
         else:
-            tokens = tokenize(description)
-            evidence = _collect_evidence(tokens, profile)
+            evidence = (
+                _collect_evidence(tokenize(description), profile)
+                if profile.association_window_tokens is None
+                else _collect_contextual_evidence(description, profile)
+            )
             state, reason = decide(evidence)
         return ScreeningEvaluation(
             id=self._new_id(),
@@ -108,6 +150,8 @@ def decide(evidence: Sequence[ScreeningEvidence]) -> tuple[ScreeningStatus, Reas
 
     categories = {item.category for item in evidence}
     has_context = "context" in categories
+    has_ambiguous_context = "ambiguous_context" in categories
+    has_excluded_context = "excluded_context" in categories
     has_maintenance = "maintenance" in categories
     has_sanitization = "sanitization" in categories
     has_service = has_maintenance or has_sanitization
@@ -116,6 +160,8 @@ def decide(evidence: Sequence[ScreeningEvidence]) -> tuple[ScreeningStatus, Reas
     has_parts = "parts" in categories
     relevant = has_context and has_service
 
+    if has_excluded_context:
+        return ScreeningStatus.DISCARDED, ReasonCode.EXCLUDED_CONTEXT
     if relevant and has_installation:
         return ScreeningStatus.PENDING, ReasonCode.MIXED_MAINTENANCE_INSTALLATION
     if relevant and (has_purchase or has_parts):
@@ -132,6 +178,8 @@ def decide(evidence: Sequence[ScreeningEvidence]) -> tuple[ScreeningStatus, Reas
         return ScreeningStatus.DISCARDED, ReasonCode.ISOLATED_EQUIPMENT_PURCHASE
     if has_context:
         return ScreeningStatus.PENDING, ReasonCode.AMBIGUOUS_RELEVANT_CONTEXT
+    if has_ambiguous_context:
+        return ScreeningStatus.PENDING, ReasonCode.AMBIGUOUS_RELEVANT_CONTEXT
     if has_service and (has_installation or has_purchase or has_parts):
         return ScreeningStatus.PENDING, ReasonCode.AMBIGUOUS_RELEVANT_CONTEXT
     return ScreeningStatus.DISCARDED, ReasonCode.NO_RELEVANT_SCOPE
@@ -140,27 +188,104 @@ def decide(evidence: Sequence[ScreeningEvidence]) -> tuple[ScreeningStatus, Reas
 def _collect_evidence(
     tokens: tuple[str, ...], profile: ScreeningProfile
 ) -> tuple[ScreeningEvidence, ...]:
+    return tuple(
+        _to_evidence(item, tokens) for item in _collect_matches(tokens, profile)
+    )
+
+
+def _collect_contextual_evidence(
+    description: str, profile: ScreeningProfile
+) -> tuple[ScreeningEvidence, ...]:
+    window = profile.association_window_tokens
+    if window is None:
+        raise ValueError("perfil contextual exige association_window_tokens")
+    evidence: list[ScreeningEvidence] = []
+    for clause in _CLAUSE_SEPARATOR.split(description):
+        tokens = tokenize(clause)
+        matches = _collect_matches(tokens, profile)
+        contexts = tuple(
+            item
+            for item in matches
+            if item.category in {"context", "ambiguous_context"}
+        )
+        associated = {
+            item
+            for item in matches
+            if item.category in {"context", "ambiguous_context"}
+            or any(_token_gap(item, context, tokens) <= window for context in contexts)
+        }
+        exclusions = tuple(
+            item
+            for item in matches
+            if item.category in {"installation", "purchase", "parts"}
+        )
+        services = tuple(
+            item for item in matches if item.category in {"maintenance", "sanitization"}
+        )
+        associated_exclusions = tuple(item for item in exclusions if item in associated)
+        associated.update(
+            service
+            for service in services
+            if any(
+                _token_gap(service, exclusion, tokens) == 0
+                for exclusion in associated_exclusions
+            )
+        )
+        if any(service in associated for service in services) and contexts:
+            associated.update(exclusions)
+        for item in matches:
+            if item in associated:
+                evidence.append(_to_evidence(item, tokens))
+    return tuple(evidence)
+
+
+def _collect_matches(
+    tokens: tuple[str, ...], profile: ScreeningProfile
+) -> tuple[_Match, ...]:
     buckets = (
         ("context", profile.context_terms),
+        ("ambiguous_context", profile.ambiguous_context_terms),
+        ("excluded_context", profile.excluded_context_terms),
         ("maintenance", profile.maintenance_terms),
         ("sanitization", profile.sanitization_terms),
         ("installation", profile.installation_terms),
         ("purchase", profile.purchase_terms),
         ("parts", profile.parts_terms),
     )
-    evidence: list[ScreeningEvidence] = []
+    matches: list[_Match] = []
     for category, terms in buckets:
         for term in terms:
             for start, end in find_matches(tokens, term):
-                evidence.append(
-                    ScreeningEvidence(
+                matches.append(
+                    _Match(
                         category=category,
                         configured_term=term,
-                        field=ANALYZED_FIELD,
-                        matched_text=matched_span(tokens, start, end),
+                        start=start,
+                        end=end,
                     )
                 )
-    return tuple(evidence)
+    return tuple(matches)
+
+
+def _to_evidence(item: _Match, tokens: tuple[str, ...]) -> ScreeningEvidence:
+    return ScreeningEvidence(
+        category=item.category,
+        configured_term=item.configured_term,
+        field=ANALYZED_FIELD,
+        matched_text=matched_span(tokens, item.start, item.end),
+    )
+
+
+def _token_gap(left: _Match, right: _Match, tokens: tuple[str, ...]) -> int:
+    if left.end <= right.start:
+        between = tokens[left.end : right.start]
+    elif right.end <= left.start:
+        between = tokens[right.end : left.start]
+    else:
+        between = ()
+    return sum(
+        token not in _ASSOCIATION_FILLERS and not token.isdecimal() for token in between
+    )
 
 
 def _reason_text(reason: ReasonCode, evidence: Sequence[ScreeningEvidence]) -> str:

@@ -17,6 +17,7 @@ from collector.application import (
     PersistScreening,
     PublicationPaginator,
     usiar_v1,
+    usiar_v2,
 )
 from collector.infra.database import (
     SqlAlchemyCollectionRepository,
@@ -83,7 +84,9 @@ def parser() -> argparse.ArgumentParser:
         dest="modalities",
         help="Código PNCP. Repita a opção para múltiplas modalidades.",
     )
-    run.add_argument("--profile", choices=("USIAR/v1",), default="USIAR/v1")
+    run.add_argument(
+        "--profile", choices=("USIAR/v1", "USIAR/v2"), default="USIAR/v1"
+    )
     run.add_argument(
         "--page-size",
         type=_positive_int,
@@ -139,7 +142,7 @@ def main(
                 uf=arguments.uf,
                 page_size=arguments.page_size,
             ),
-            usiar_v1(),
+            {"USIAR/v1": usiar_v1, "USIAR/v2": usiar_v2}[arguments.profile](),
         )
     except Exception as exc:  # noqa: BLE001 - CLI sanitiza a falha operacional
         logging.getLogger(__name__).error(

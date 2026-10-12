@@ -136,6 +136,31 @@ def test_cli_sanitizes_operational_failure(capsys):
     assert "secret database details" not in captured.err
 
 
+def test_cli_selects_usiar_v2_explicitly(capsys):
+    runner = StubRunner()
+
+    exit_code = main(
+        [
+            "run",
+            "--start-date",
+            "2026-10-01",
+            "--end-date",
+            "2026-10-01",
+            "--uf",
+            "SP",
+            "--modality",
+            "6",
+            "--profile",
+            "USIAR/v2",
+        ],
+        runner_factory=lambda _max_pages: runner,
+    )
+
+    assert exit_code == 0
+    assert runner.calls[0][1].identity == "USIAR/v2"
+    assert json.loads(capsys.readouterr().out)["status"] == "SUCCESS"
+
+
 @pytest.mark.parametrize(
     ("status", "expected_exit_code"),
     (("SUCCESS", 0), ("FAILED", 1), ("PARTIAL", 3)),

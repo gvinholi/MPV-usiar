@@ -14,6 +14,7 @@ from collector.application import (
     RoundObservation,
     ScreeningMetrics,
     usiar_v1,
+    usiar_v2,
 )
 from collector.application.persistence.errors import PersistenceError
 from collector.domain import RoundStatus
@@ -261,6 +262,26 @@ def test_same_round_reexecution_is_idempotent():
 
     assert first.observations_created == 1
     assert second.observations_created == 0
+    assert second.evaluations_created == 0
+    assert second.resolutions_created == 0
+    assert len(collections.observations) == 1
+    assert len(screenings.evaluations) == 1
+    assert len(resolutions.resolutions) == 1
+
+
+def test_same_round_reexecution_with_usiar_v2_is_idempotent():
+    result = collection_result(
+        process(
+            "same-v2",
+            description="Manutenção preventiva de sistema HVAC.",
+        )
+    )
+    runner, collections, screenings, resolutions, _ = _runner(result)
+
+    first = runner.run(_request(6), usiar_v2())
+    second = runner.run(_request(6), usiar_v2())
+
+    assert first.candidates == 1
     assert second.evaluations_created == 0
     assert second.resolutions_created == 0
     assert len(collections.observations) == 1

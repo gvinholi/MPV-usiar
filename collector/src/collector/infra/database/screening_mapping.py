@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from collector.application.screening.profile import ScreeningProfile
 from collector.application.screening.reasons import ReasonCode
-from collector.application.screening.results import ScreeningEvaluation, ScreeningEvidence
+from collector.application.screening.results import (
+    ScreeningEvaluation,
+    ScreeningEvidence,
+)
 from collector.domain import ScreeningStatus
 
 
-def profile_configuration_payload(profile: ScreeningProfile) -> dict[str, list[str]]:
-    return {key: list(values) for key, values in profile.configuration().items()}
+def profile_configuration_payload(profile: ScreeningProfile) -> dict[str, object]:
+    return {
+        key: list(value) if isinstance(value, tuple) else value
+        for key, value in profile.configuration().items()
+    }
 
 
 def profile_from_payload(
@@ -19,7 +25,7 @@ def profile_from_payload(
     name: str,
     version: str,
     active: bool,
-    configuration: dict[str, list[str]],
+    configuration: dict[str, object],
 ) -> ScreeningProfile:
     return ScreeningProfile(
         id=id,
@@ -33,6 +39,9 @@ def profile_from_payload(
         installation_terms=tuple(configuration.get("installation_terms", ())),
         purchase_terms=tuple(configuration.get("purchase_terms", ())),
         parts_terms=tuple(configuration.get("parts_terms", ())),
+        ambiguous_context_terms=tuple(configuration.get("ambiguous_context_terms", ())),
+        excluded_context_terms=tuple(configuration.get("excluded_context_terms", ())),
+        association_window_tokens=configuration.get("association_window_tokens"),
     )
 
 
