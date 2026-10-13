@@ -1533,3 +1533,37 @@ model não duplica o timestamp nem aplica fuso de apresentação.
 Autenticação `dashboard:read`, paginação 1..100, allowlist de ordenação, sanitização de
 URLs e erros permanecem inalterados. Não há migration, tabela Next.js, scheduler,
 exportação, administração ou integração adicional.
+
+---
+
+## 49. Tela Next.js de oportunidades
+
+`/opportunities` substitui a página de fundação por um Server Component dentro do
+layout autenticado existente. A página obtém a credencial por `requireSession` e chama
+somente `createApiClient(...).listOpportunities`; não existe Route Handler público,
+proxy genérico, fetch no navegador ou serialização de Bearer para Client Components.
+OIDC e autenticação interna continuam selecionando a mesma porta `BearerCredential`.
+
+O ambiente precisa declarar exclusivamente
+`API_PROFILE_ID=42227c23-f6ea-5a43-b640-56ed6eb6981c`. A página rejeita configuração
+por code ou UUID diferente. O BFF aceita o contrato escalar anterior e também arrays de
+estado, serializados como parâmetros repetidos. A consulta padrão envia `CANDIDATE` e
+`PENDING`; filtros individuais enviam somente o estado escolhido. Página e filtro são
+validados a partir de `searchParams`, e toda mudança de filtro descarta a página atual.
+
+A API permanece responsável por filtragem, total e paginação. O frontend solicita 25
+itens, ordenados por `publication_at DESC`, e usa o envelope de paginação para habilitar
+Anterior/Próxima. A tabela mantém as 12 colunas UsiAr em um contêiner com rolagem
+horizontal. Não há filtragem em memória nem dados fictícios fora das fixtures de teste.
+
+`publication_at` só é apresentado quando contém offset; DATA e Hr preservam os
+componentes oficiais do timestamp, sem converter silenciosamente para o fuso do
+servidor. Decimais são formatados por aritmética textual/`BigInt`, evitando perda de
+precisão e distinguindo `null` de zero. URLs recebem uma segunda validação HTTP(S), sem
+credenciais, antes de virarem links com `noopener noreferrer`. Descrições são texto
+puro e podem ser expandidas com `<details>`; HTML do PNCP nunca é interpretado.
+
+O segmento possui loading próprio. Resultado vazio da consulta padrão informa que a
+primeira coleta ainda não produziu oportunidades; erros preservam a semântica da API e
+oferecem nova tentativa. Resposta 401 invalida a sessão conforme o modo existente e
+redireciona para `/login?error=session`.

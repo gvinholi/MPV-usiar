@@ -56,7 +56,8 @@ $env:AUTH_COOKIE_KEY = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+
 $env:AUTH_MODE = "internal"
 $env:APP_ORIGIN = "http://127.0.0.1:3000"
 $env:FASTAPI_BASE_URL = "http://127.0.0.1:8000"
-$env:API_PROFILE_CODE = "USIAR"
+$env:API_PROFILE_ID = "42227c23-f6ea-5a43-b640-56ed6eb6981c"
+$env:API_PROFILE_CODE = ""
 npm.cmd run dev
 ```
 
@@ -73,7 +74,7 @@ Todas as variáveis abaixo são exclusivas do servidor. Não há contrato `NEXT_
 | `API_TIMEOUT_MS` | 100–30000 ms; padrão 10000 |
 | `SESSION_IDLE_SECONDS` | Limite de inatividade; padrão 1800 |
 | `SESSION_ABSOLUTE_SECONDS` | Limite absoluto; padrão 28800; também limitado por `expires_in` do access token |
-| `API_PROFILE_ID` / `API_PROFILE_CODE` | Configuração do perfil para futuras páginas de consulta; no máximo um; consultas por perfil exigem exatamente um |
+| `API_PROFILE_ID` / `API_PROFILE_CODE` | Perfil das consultas; `/opportunities` exige o UUID de USIAR/v2 em `API_PROFILE_ID` e `API_PROFILE_CODE` vazio |
 | `OIDC_ISSUER` | Issuer HTTPS aprovado; discovery com comparação exata |
 | `OIDC_CLIENT_ID` | Cliente registrado pelo administrador |
 | `OIDC_CLIENT_AUTH_METHOD` | `client_secret_basic`, `client_secret_post` ou `none`, conforme registro |
@@ -154,6 +155,29 @@ O funil exibe somente contagens absolutas fornecidas pela API. A interface não 
 taxas, perdas, tendências, percentuais ou rodadas em andamento. Fontes são tratadas
 como strings abertas. Resumo realmente zerado tem estado vazio próprio; falhas 401,
 403, 404, 409, 422, 500, 503, rede e timeout continuam sendo erros, nunca listas vazias.
+
+## Tela de oportunidades
+
+`/opportunities` é um Server Component protegido e usa somente a operação nomeada
+`listOpportunities` do BFF. O Bearer permanece no servidor. A consulta envia
+explicitamente `profile_id=42227c23-f6ea-5a43-b640-56ed6eb6981c` e repete
+`operational_state` para `CANDIDATE` e `PENDING`; `DISCARDED` não participa da
+listagem padrão.
+
+Os filtros “Todas as relevantes”, “Somente candidatas” e “Somente pendentes” alteram
+a URL e sempre reiniciam na página 1. Anterior/Próxima solicitam uma nova página de
+25 itens à API; nenhuma paginação ou filtragem global é simulada no navegador.
+
+A tabela preserva as 12 colunas da aba UsiAr e usa rolagem horizontal em telas
+estreitas. Timestamp com offset é apresentado pela data e hora oficiais codificadas,
+sem conversão implícita de fuso. Valores decimais são formatados em BRL; `null` vira
+“—” e zero permanece `R$ 0,00`. Links são renderizados apenas para HTTP(S) sem
+credenciais. Cidade identifica a unidade compradora, não o local inferido de execução.
+
+Antes da primeira coleta, a tela mostra um estado vazio específico. Falhas da API
+mantêm estado de erro e ação de nova tentativa; 401 segue o fluxo existente de sessão
+expirada. `rhs_id`, `notice_number` e `monthly_value` podem aparecer vazios porque o
+PNCP não fornece esses conceitos de forma segura em todos os registros.
 
 ## Verificações
 

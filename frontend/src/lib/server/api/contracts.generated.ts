@@ -123,6 +123,7 @@ export const OpportunityListItemResponseSchema = z.object({
   publication_at: z.iso.datetime({ offset: true }).nullable(),
   proposal_deadline_at: z.iso.datetime({ offset: true }).nullable(),
   official_url: z.string().nullable(),
+  notice_number: z.string().nullable(),
   operational_resolution_id: z.uuid().nullable(),
   operational_state: z.string().nullable(),
   operational_reason: z.string().nullable(),
@@ -135,6 +136,8 @@ export const OpportunityListItemResponseSchema = z.object({
   has_text: z.boolean(),
   has_document_screening: z.boolean(),
   latest_capture_at: z.iso.datetime({ offset: true }).nullable(),
+  rhs_id: z.string().nullable(),
+  monthly_value: z.string().nullable(),
 }).strict();
 export type OpportunityListItemResponse = z.infer<typeof OpportunityListItemResponseSchema>;
 

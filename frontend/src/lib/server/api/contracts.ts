@@ -23,9 +23,13 @@ function ordered(start?: string, end?: string) { return !start || !end || Date.p
 export const summaryQuery = z.object({ ...profileFields, ...periodFields }).strict().refine(oneProfile)
   .refine(v => ordered(v.from_datetime, v.to_datetime));
 export type SummaryQuery = z.input<typeof summaryQuery>;
+const operationalState = z.enum(["CANDIDATE", "PENDING", "DISCARDED"]);
 export const opportunitiesQuery = z.object({
   ...profileFields, ...paginationFields, ...sortFields,
-  operational_state: z.enum(["CANDIDATE", "PENDING", "DISCARDED"]).optional(),
+  operational_state: z.union([
+    operationalState,
+    z.array(operationalState).min(1).max(3).refine(value => new Set(value).size === value.length),
+  ]).optional(),
   human_review_status: HumanReviewStatusSchema.optional(), human_decision: HumanReviewDecisionSchema.optional(),
   source: z.enum(["PNCP", "RHS"]).optional(), uf: z.string().regex(/^[a-zA-Z]{2}$/).transform(v => v.toUpperCase()).optional(),
   municipality: text.optional(), modality: text.optional(), search: text.optional(),

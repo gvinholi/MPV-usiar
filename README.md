@@ -261,6 +261,26 @@ estáveis.
 Os campos existentes foram reutilizados; apenas `rhs_id` e `monthly_value` foram
 acrescentados como nullable. Para obter o objeto integral, use o endpoint de detalhe.
 
+### Tela Next.js de oportunidades
+
+Com o frontend e a API em execução, acesse `http://127.0.0.1:3000/opportunities`
+depois do login. O servidor Next.js deve usar exclusivamente:
+
+```powershell
+$env:API_PROFILE_ID = "42227c23-f6ea-5a43-b640-56ed6eb6981c"
+$env:API_PROFILE_CODE = ""
+```
+
+A tela consulta o BFF autenticado, solicita `CANDIDATE` e `PENDING` explicitamente e
+pagina 25 registros por vez no PostgreSQL. Os filtros de estado reiniciam a página;
+Anterior e Próxima fazem novas requisições ao servidor. As 12 colunas da aba UsiAr
+são mantidas com rolagem horizontal. Campos sem origem oficial aparecem como `—`,
+inclusive antes de existir `rhs_id`, número de edital inequívoco ou valor mensal.
+
+Sem uma primeira coleta USIAR/v2, `/opportunities` mostra “Nenhuma oportunidade
+coletada”. Erros de comunicação não são convertidos em lista vazia e uma sessão
+expirada retorna ao login.
+
 ### Campos oficiais para a aba UsiAr
 
 O snapshot da contratação preserva os campos oficiais usados pelo read model. No PNCP,

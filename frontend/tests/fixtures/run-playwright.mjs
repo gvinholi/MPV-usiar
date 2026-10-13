@@ -10,7 +10,7 @@ const oidcEnvironment = {
   ...inherited, AUTH_MODE: "oidc", APP_ORIGIN: "http://127.0.0.1:3100", FASTAPI_BASE_URL: "http://127.0.0.1:8100",
   OIDC_ISSUER: "https://127.0.0.1:4443", OIDC_CLIENT_ID: "test-client", OIDC_CLIENT_SECRET: "test-only-secret",
   OIDC_CLIENT_AUTH_METHOD: "client_secret_basic", OIDC_SCOPES: "openid dashboard:read", OIDC_ID_TOKEN_ALG: "RS256",
-  OIDC_RESOURCE: "", OIDC_AUDIENCE: "", API_PROFILE_ID: "", API_PROFILE_CODE: "USIAR",
+  OIDC_RESOURCE: "", OIDC_AUDIENCE: "", API_PROFILE_ID: "42227c23-f6ea-5a43-b640-56ed6eb6981c", API_PROFILE_CODE: "",
   NODE_EXTRA_CA_CERTS: resolve(".test-tls/ca.pem"), NEXT_TELEMETRY_DISABLED: "1",
 };
 const productionEnvironment = {

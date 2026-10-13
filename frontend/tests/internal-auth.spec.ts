@@ -25,6 +25,9 @@ test("internal login, responsive dashboard and logout keep FastAPI secrets out o
   await login(page);
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByRole("heading", { name: "Dashboard operacional", exact: true })).toBeVisible();
+  await page.goto("/opportunities");
+  await expect(page.getByRole("heading", { name: "Oportunidades", exact: true })).toBeVisible();
+  await expect(page.getByRole("table", { name: "Oportunidades relevantes no formato da planilha UsiAr" })).toBeVisible();
   const cookies = await context.cookies("http://127.0.0.1:3300");
   const session = cookies.find(cookie => cookie.name === "usiar-internal-session");
   expect(session).toMatchObject({ httpOnly: true, sameSite: "Lax", secure: false, path: "/" });

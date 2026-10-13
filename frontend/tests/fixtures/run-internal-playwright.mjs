@@ -13,8 +13,8 @@ const nextEnvironment = {
   AUTH_COOKIE_KEY: "A".repeat(43),
   APP_ORIGIN: "http://127.0.0.1:3300",
   FASTAPI_BASE_URL: "http://127.0.0.1:8100",
-  API_PROFILE_ID: "",
-  API_PROFILE_CODE: "USIAR",
+  API_PROFILE_ID: "42227c23-f6ea-5a43-b640-56ed6eb6981c",
+  API_PROFILE_CODE: "",
   NEXT_TELEMETRY_DISABLED: "1",
 };
 

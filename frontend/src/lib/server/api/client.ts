@@ -5,7 +5,8 @@ import type { Environment } from "../env";
 import * as c from "./contracts";
 import { ApiError, httpError } from "./errors";
 
-type Query = Record<string, string | number | boolean | undefined>;
+type QueryPrimitive = string | number | boolean;
+type Query = Record<string, QueryPrimitive | readonly QueryPrimitive[] | undefined>;
 export type BearerCredential = {
   read(): Promise<string | undefined>;
   invalidate(): Promise<void>;
@@ -38,7 +39,11 @@ export function createApiClient(env: Environment, credential: BearerCredential, 
     if (!accessToken) throw new ApiError("UNAUTHENTICATED", 401);
     const url = new URL(path, env.FASTAPI_BASE_URL);
     if (url.origin !== env.FASTAPI_BASE_URL) throw new ApiError("INVALID_RESPONSE", 502);
-    for (const [name, value] of Object.entries(query)) if (value !== undefined) url.searchParams.set(name, String(value));
+    for (const [name, value] of Object.entries(query)) {
+      if (value === undefined) continue;
+      if (Array.isArray(value)) value.forEach(item => url.searchParams.append(name, String(item)));
+      else url.searchParams.set(name, String(value));
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), env.API_TIMEOUT_MS);
     const requestId = randomUUID();

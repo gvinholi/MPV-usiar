@@ -9,9 +9,9 @@ const item = {
   process_id: id, source: "PNCP", official_id: "123/2026/1", description_preview: "Manutenção",
   organization_name: null, organization_cnpj: null, municipality_name: null, uf: null, modality: null,
   estimated_value: "12345678901234567890.12", publication_at: "2026-10-01T12:00:00-03:00", proposal_deadline_at: null,
-  official_url: null, operational_resolution_id: null, operational_state: null, operational_reason: null, operational_resolved_at: null,
+  official_url: null, notice_number: null, operational_resolution_id: null, operational_state: null, operational_reason: null, operational_resolved_at: null,
   human_review_status: "UNREVIEWED", human_decision: null, human_reason: null, reviewed_at: null,
-  documents_count: 0, has_text: false, has_document_screening: false, latest_capture_at: null,
+  documents_count: 0, has_text: false, has_document_screening: false, latest_capture_at: null, rhs_id: null, monthly_value: null,
 };
 const page = { items: [item], pagination: { page: 1, page_size: 25, total_items: 1, total_pages: 1 } };
 
@@ -28,6 +28,18 @@ describe("server-only HTTP client", () => {
     expect(options).toMatchObject({ redirect: "error", credentials: "omit", cache: "no-store", method: "GET" });
     const headers = new Headers(options.headers);
     expect(headers.get("authorization")).toBe("Bearer test-only-access-token"); expect(headers.has("cookie")).toBe(false);
+  });
+  it("repeats operational_state and selects USIAR/v2 explicitly", async () => {
+    const f = await apiFixture(); const transport = vi.fn(async () => Response.json(page));
+    const api = createApiClient(f.env, f.credential, transport);
+    await api.listOpportunities({
+      profile_id: "42227c23-f6ea-5a43-b640-56ed6eb6981c",
+      operational_state: ["CANDIDATE", "PENDING"],
+    });
+    const [url] = transport.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.searchParams.get("profile_id")).toBe("42227c23-f6ea-5a43-b640-56ed6eb6981c");
+    expect(url.searchParams.getAll("operational_state")).toEqual(["CANDIDATE", "PENDING"]);
+    expect(url.searchParams.has("profile_code")).toBe(false);
   });
   it.each([401, 403, 404, 409, 422, 500, 503])("normalizes %i without leaking upstream messages", async status => {
     const f = await apiFixture(); const transport = vi.fn(async () => Response.json({ error: { code: "SECRET", message: "test-only-access-token internal SQL password" } }, { status }));
@@ -90,6 +102,8 @@ describe("query contracts", () => {
     { profile_code: "USIAR", captured_from: "2026-10-01T10:00:00" },
     { profile_code: "USIAR", captured_from: "2026-10-02T00:00:00Z", captured_to: "2026-10-01T00:00:00Z" },
     { profile_code: "USIAR", include_operational_discarded: true },
+    { profile_code: "USIAR", operational_state: [] },
+    { profile_code: "USIAR", operational_state: ["CANDIDATE", "CANDIDATE"] },
   ])("rejects unsupported query %j", query => { expect(opportunitiesQuery.safeParse(query).success).toBe(false); });
   it("preserves timezone and half-open interval boundaries", () => {
     const query = { profile_code: "USIAR", from_datetime: "2026-10-01T00:00:00-03:00", to_datetime: "2026-10-02T00:00:00-03:00" };

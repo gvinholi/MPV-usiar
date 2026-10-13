@@ -46,6 +46,7 @@ describe("generated FastAPI contracts", () => {
       publication_at: null,
       proposal_deadline_at: null,
       official_url: null,
+      notice_number: null,
       operational_resolution_id: null,
       operational_state: null,
       operational_reason: null,
@@ -58,6 +59,8 @@ describe("generated FastAPI contracts", () => {
       has_text: false,
       has_document_screening: false,
       latest_capture_at: null,
+      rhs_id: null,
+      monthly_value: null,
     };
     expect(OpportunityListItemResponseSchema.safeParse(item).success).toBe(true);
     const withoutRequiredNullable = Object.fromEntries(

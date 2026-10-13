@@ -14,8 +14,7 @@ test.beforeEach(async ({ request }) => {
 test("renders the real summary contract and an unknown source responsively", async ({ page }) => {
   await login(page);
   await expect(page.getByRole("heading", { name: "Dashboard operacional" })).toBeVisible();
-  await expect(page.getByText("Código USIAR")).toBeVisible();
-  await expect(page.getByText("c7d2d8d1-6dc4-4d2e-9aa5-ce4359ff9ad4")).toBeVisible();
+  await expect(page.getByText("ID 42227c23-f6ea-5a43-b640-56ed6eb6981c")).toBeVisible();
   for (const section of ["Indicadores principais", "Situação atual da coorte", "Funil de oportunidades", "Atividade no período", "Cobertura por fonte"]) {
     await expect(page.getByRole("heading", { name: section })).toBeVisible();
   }
