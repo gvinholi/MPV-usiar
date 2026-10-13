@@ -179,7 +179,8 @@ class SqlAlchemyReadModelStore:
             raise OpportunityNotFoundError(str(process_id))
         identities = tuple(_dto(SourceIdentityItem, r) for r in session.execute(text(
             'SELECT source, official_id FROM source_identities WHERE process_id=:id ORDER BY source, official_id'), params).mappings())
-        initial = session.execute(text('SELECT * FROM screening_evaluations WHERE process_id=:id AND profile_id=:profile_id ORDER BY evaluated_at DESC, created_at DESC, engine_version DESC, id DESC LIMIT 1'), params).mappings().first()
+        params['observation_id'] = row['observation_id']
+        initial = session.execute(text('SELECT * FROM screening_evaluations WHERE process_id=:id AND profile_id=:profile_id AND observation_id=:observation_id ORDER BY evaluated_at DESC, created_at DESC, engine_version DESC, id DESC LIMIT 1'), params).mappings().first()
         initial_item = None
         if initial:
             evidence = tuple(_dto(InitialEvidenceItem, e) for e in session.execute(text(
@@ -381,8 +382,10 @@ class SqlAlchemyReadModelStore:
                 FROM collection_rounds WHERE {rounds_period}'''), params).mappings().one()
             activity = _dto(PeriodActivity, activity)
             initial = session.execute(text(BASE + f''', initial AS (
-                SELECT e.*, row_number() OVER (PARTITION BY process_id ORDER BY evaluated_at DESC,created_at DESC,engine_version DESC,id DESC) rn
-                FROM screening_evaluations e WHERE profile_id=:profile_id)
+                SELECT e.*, row_number() OVER (PARTITION BY e.process_id ORDER BY e.evaluated_at DESC,e.created_at DESC,e.engine_version DESC,e.id DESC) rn
+                FROM screening_evaluations e JOIN base current_b ON current_b.process_id=e.process_id
+                    AND current_b.observation_id=e.observation_id
+                WHERE e.profile_id=:profile_id)
                 SELECT count(*) FILTER (WHERE i.state='CANDIDATE') candidate,
                 count(*) FILTER (WHERE i.state='PENDING') pending,
                 count(*) FILTER (WHERE i.state='DISCARDED') discarded,

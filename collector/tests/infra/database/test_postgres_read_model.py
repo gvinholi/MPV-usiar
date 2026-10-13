@@ -91,7 +91,8 @@ def test_summary_funnel_and_current_states(dataset):
 
 @pytest.mark.parametrize('filters,expected', [
     (F(operational_state='CANDIDATE'),5),(F(operational_state='PENDING'),1),
-    (F(operational_state='DISCARDED'),1),(F(human_review_status=HS.STALE),1),
+    (F(operational_state='DISCARDED'),1),(F(operational_state=('CANDIDATE','PENDING')),6),
+    (F(human_review_status=HS.STALE),1),
     (F(human_decision=D.PENDING),1),(F(human_decision=D.DISCARDED),1),
     (F(source='PNCP'),7),(F(source='RHS'),0),(F(uf='sp'),7),(F(uf='RJ'),0),
     (F(municipality='Campinas'),7),(F(modality='Pregão Eletrônico'),7),
@@ -103,6 +104,21 @@ def test_summary_funnel_and_current_states(dataset):
 def test_filters(dataset,filters,expected):
     _,_,query,scope,*_ = dataset
     assert query.list_opportunities(scope,filters).total_items == expected
+
+
+def test_multi_state_filter_precedes_stable_pagination(dataset):
+    _, _, query, scope, *_ = dataset
+    filters = F(operational_state=("CANDIDATE", "PENDING"))
+    first = query.list_opportunities(scope, filters, Pagination(1, 2))
+    second = query.list_opportunities(scope, filters, Pagination(2, 2))
+    assert first.total_items == second.total_items == 6
+    assert {item.operational_state for item in first.items + second.items} <= {
+        "CANDIDATE",
+        "PENDING",
+    }
+    assert not {item.process_id for item in first.items} & {
+        item.process_id for item in second.items
+    }
 
 
 def test_pagination_sort_decimal_timezone_nullability(dataset):
@@ -119,6 +135,8 @@ def test_pagination_sort_decimal_timezone_nullability(dataset):
     assert item.latest_capture_at.utcoffset() is not None
     assert item.official_url is None
     assert item.notice_number is None
+    assert item.rhs_id is None
+    assert item.monthly_value is None
     assert item.human_decision is None
     assert item.documents_count == 0
 
@@ -221,7 +239,36 @@ def test_profile_isolation(dataset):
     assert query.dashboard_summary(other).current_snapshot.human_discarded == 1
     v2 = PersistScreening(SqlAlchemyScreeningRepository(factory)).persist_profile(usiar_v2())
     with pytest.raises(AmbiguousProfileError): query.list_opportunities(ProfileScope(profile_code=usiar_v1().code))
-    assert query.dashboard_summary(ProfileScope(profile_id=v2.id)).profile_id == v2.id
+    v2_scope = ProfileScope(profile_id=v2.id)
+    assert query.dashboard_summary(v2_scope).profile_id == v2.id
+    assert (
+        query.list_opportunities(
+            v2_scope, F(operational_state=("CANDIDATE", "PENDING"))
+        ).total_items
+        == 0
+    )
+    with factory() as session:
+        observation = session.scalar(
+            text("SELECT id FROM process_observations WHERE process_id=:id"),
+            {"id": snapshots[0].id},
+        )
+    v2_evaluation = ScreeningEngine().evaluate(
+        v2,
+        description=snapshots[0].description,
+        process_id=snapshots[0].id,
+        observation_id=observation,
+        profile_id=v2.id,
+    )
+    screening.persist_evaluation(v2_evaluation)
+    PersistOperationalResolution(SqlAlchemyOperationalResolutionRepository(factory)).persist(
+        OperationalResolver().resolve(v2_evaluation, None)
+    )
+    v2_page = query.list_opportunities(
+        v2_scope, F(operational_state=("CANDIDATE", "PENDING"))
+    )
+    assert v2_page.total_items == 1
+    assert v2_page.items[0].process_id == snapshots[0].id
+    assert v2_page.items[0].human_review_status == HS.UNREVIEWED
     with pytest.raises(ProfileNotFoundError): query.list_opportunities(ProfileScope(profile_id=uuid4()))
     assert query.list_opportunities(scope).total_items == 7
 
@@ -381,22 +428,43 @@ def test_zip_and_unacquired_document(migrated_engine,db_session,persist_service,
 
 
 def test_latest_observation_and_distinct_source_coverage(dataset):
-    _,_,query,scope,snapshots,_,persist,_=dataset
-    newer=replace(snapshots[0],description='latest description',last_captured_at=NOW+timedelta(days=1))
-    persist.persist(collection_result(newer,started_at=NOW+timedelta(days=1),ended_at=NOW+timedelta(days=1,minutes=1)))
-    detail=query.get_opportunity(snapshots[0].id,scope)
-    assert detail.description=='latest description'
-    assert detail.opportunity.latest_capture_at==NOW+timedelta(days=1)
+    _, _, query, scope, snapshots, _, persist, _ = dataset
+    newer = replace(
+        snapshots[0],
+        description="latest description",
+        last_captured_at=NOW + timedelta(days=1),
+    )
+    persist.persist(
+        collection_result(
+            newer,
+            started_at=NOW + timedelta(days=1),
+            ended_at=NOW + timedelta(days=1, minutes=1),
+        )
+    )
+    detail = query.get_opportunity(snapshots[0].id, scope)
+    assert detail.description == "latest description"
+    assert detail.opportunity.latest_capture_at == NOW + timedelta(days=1)
+    assert detail.opportunity.operational_state is None
+    assert detail.initial_screening is None
+    assert query.dashboard_summary(scope).funnel.initial_candidate == 6
+    visible = query.list_opportunities(
+        scope, F(operational_state=("CANDIDATE", "PENDING"))
+    )
+    assert visible.total_items == 5
+    assert snapshots[0].id not in {item.process_id for item in visible.items}
+
     assert query.source_coverage()[0].unique_processes==7
     assert query.source_coverage()[0].records_collected==8
     assert query.list_opportunities(scope).total_items==7
 
 
 def test_official_fields_are_read_from_persisted_snapshot(dataset):
-    _,_,query,scope,snapshots,*_=dataset
-    item=query.get_opportunity(snapshots[1].id,scope).opportunity
-    assert item.notice_number=='EDITAL-1/2026'
-    assert item.official_url=='https://pncp.gov.br/app/editais/example'
+    _, _, query, scope, snapshots, *_ = dataset
+    item = query.get_opportunity(snapshots[1].id, scope).opportunity
+    assert item.notice_number == "EDITAL-1/2026"
+    assert item.official_url == "https://pncp.gov.br/app/editais/example"
+    assert item.rhs_id is None
+    assert item.monthly_value is None
 
 
 def test_all_queries_preserve_persisted_rows(dataset):

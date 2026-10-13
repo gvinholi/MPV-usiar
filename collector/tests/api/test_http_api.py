@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -123,6 +123,8 @@ def test_list_contract_decimal_datetime_uuid_enum_null_unicode(client):
     assert result["description_preview"] == "Manutenção preventiva de climatização – São Paulo"
     assert result["official_url"] == "https://example.gov.br/edital/42"
     assert result["notice_number"] is None
+    assert result["rhs_id"] is None
+    assert result["monthly_value"] is None
     assert body["pagination"] == {"page": 1, "page_size": 25, "total_items": 1, "total_pages": 1}
 
 
@@ -140,6 +142,22 @@ def test_filters_reach_application(fake):
     assert pagination.page == 2 and sort.field.value == "estimated_value" and sort.direction.value == "ASC"
 
 
+def test_repeated_operational_state_and_explicit_usiar_v2_reach_application(fake):
+    client = api_client(fake)
+    params = [
+        ("profile_id", "42227c23-f6ea-5a43-b640-56ed6eb6981c"),
+        ("operational_state", "CANDIDATE"),
+        ("operational_state", "PENDING"),
+    ]
+
+    response = client.get("/api/v1/opportunities", params=params)
+
+    assert response.status_code == 200
+    _, scope, filters, _, _ = fake.calls[-1]
+    assert scope.profile_id == UUID("42227c23-f6ea-5a43-b640-56ed6eb6981c")
+    assert filters.operational_state == ("CANDIDATE", "PENDING")
+
+
 def test_detail_lookup_and_paginated_endpoints(client, fake):
     assert client.get(f"/api/v1/opportunities/{PROCESS_ID}", params={"profile_id":str(PROFILE_ID)}).status_code == 200
     official = "00509968000148/2026/3341"
@@ -153,7 +171,19 @@ def test_detail_lookup_and_paginated_endpoints(client, fake):
     assert client.get(f"/api/v1/collection-rounds/{ROUND_ID}").status_code == 200
 
 
-@pytest.mark.parametrize("params", [{"page":0}, {"page_size":0}, {"page_size":101}, {"sort":"DROP TABLE processes"}, {"direction":"SIDEWAYS"}, {"profile_id":"bad"}, {"publication_from":"bad"}])
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"page": 0},
+        {"page_size": 0},
+        {"page_size": 101},
+        {"sort": "DROP TABLE processes"},
+        {"direction": "SIDEWAYS"},
+        {"profile_id": "bad"},
+        {"publication_from": "bad"},
+        {"operational_state": "SELECTED"},
+    ],
+)
 def test_validation_is_normalized(client, params):
     response = client.get("/api/v1/opportunities", params=params)
     assert response.status_code == 422 and response.json()["error"]["code"] == "VALIDATION_ERROR"

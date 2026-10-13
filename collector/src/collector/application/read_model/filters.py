@@ -60,7 +60,7 @@ class OpportunitySort:
 
 @dataclass(frozen=True)
 class OpportunityFilters:
-    operational_state: str | None = None
+    operational_state: str | tuple[str, ...] | None = None
     human_review_status: HumanReviewStatus | None = None
     human_decision: HumanReviewDecision | None = None
     source: str | None = None
@@ -78,7 +78,18 @@ class OpportunityFilters:
     include_operational_discarded: bool = False
 
     def __post_init__(self):
-        if self.operational_state not in (None, "CANDIDATE", "PENDING", "DISCARDED"):
+        allowed_states = ("CANDIDATE", "PENDING", "DISCARDED")
+        if isinstance(self.operational_state, tuple):
+            if not self.operational_state or any(
+                state not in allowed_states for state in self.operational_state
+            ):
+                raise ValueError("invalid operational state")
+            object.__setattr__(
+                self,
+                "operational_state",
+                tuple(dict.fromkeys(self.operational_state)),
+            )
+        elif self.operational_state not in (None, *allowed_states):
             raise ValueError("invalid operational state")
         for name, enum in (("human_review_status", HumanReviewStatus), ("human_decision", HumanReviewDecision), ("review_queue", ReviewQueue)):
             if getattr(self, name) is not None:

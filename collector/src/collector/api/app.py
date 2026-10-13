@@ -442,7 +442,7 @@ def create_app(
         page_size: int = Query(25, ge=1, le=100),
         sort: SortField = SortField.LATEST_CAPTURE_AT,
         direction: SortDirection = SortDirection.DESC,
-        operational_state: str | None = None,
+        operational_state: list[str] | None = Query(default=None),
         human_review_status: HumanReviewStatus | None = None,
         human_decision: HumanReviewDecision | None = None,
         source: str | None = None,
@@ -463,7 +463,9 @@ def create_app(
     ):
         filters = _validated(
             lambda: OpportunityFilters(
-                operational_state=operational_state,
+                operational_state=(
+                    tuple(operational_state) if operational_state is not None else None
+                ),
                 human_review_status=human_review_status,
                 human_decision=human_decision,
                 source=source,

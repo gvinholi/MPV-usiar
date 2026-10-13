@@ -10,8 +10,12 @@ WITH observations AS (
  SELECT o.*, row_number() OVER (PARTITION BY process_id ORDER BY captured_at DESC NULLS LAST, created_at DESC, id DESC) rn
  FROM process_observations o
 ), resolutions AS (
- SELECT r.*, row_number() OVER (PARTITION BY process_id, profile_id ORDER BY resolved_at DESC, created_at DESC, resolution_fingerprint DESC) rn
- FROM operational_resolutions r WHERE profile_id = :profile_id
+ SELECT r.*, row_number() OVER (PARTITION BY r.process_id, r.profile_id ORDER BY r.resolved_at DESC, r.created_at DESC, r.resolution_fingerprint DESC) rn
+ FROM operational_resolutions r
+ JOIN screening_evaluations e ON e.id=r.initial_evaluation_id
+ JOIN observations current_o ON current_o.process_id=r.process_id AND current_o.rn=1
+                            AND current_o.id=e.observation_id
+ WHERE r.profile_id = :profile_id
 ), reviews AS (
  SELECT h.*, row_number() OVER (PARTITION BY operational_resolution_id ORDER BY decided_at DESC, created_at DESC, sequence DESC) rn
  FROM human_reviews h
@@ -36,7 +40,8 @@ WITH observations AS (
  o.source, identity.official_id, o.description, left(o.description,300) description_preview,
  o.organization_name, o.organization_cnpj, o.locality municipality_name, o.state uf, o.modality,
  o.estimated_value, o.published_at publication_at, o.closes_at proposal_deadline_at, o.official_url,
- o.notice_number,
+ o.notice_number, CASE WHEN o.source='RHS' THEN identity.official_id END rhs_id,
+ NULL::numeric monthly_value,
  o.captured_at latest_capture_at, o.id observation_id, o.round_id, o.created_at observation_persisted_at,
  r.id operational_resolution_id, r.state operational_state, r.reason_code operational_reason,
  r.resolved_at operational_resolved_at,
@@ -91,7 +96,7 @@ def queue_predicate(queue, include_discarded=False):
 def filter_predicate(filters, params):
     clauses = []
     for field, column in (
-        ("operational_state", "operational_state"), ("human_review_status", "human_review_status"),
+        ("human_review_status", "human_review_status"),
         ("human_decision", "human_decision"), ("uf", "uf"), ("municipality", "municipality_name"),
         ("modality", "modality"), ("has_text", "has_text"), ("has_document_screening", "has_document_screening"),
     ):
@@ -99,6 +104,13 @@ def filter_predicate(filters, params):
         if value is not None:
             params[field] = value
             clauses.append(f"b.{column}=:{field}")
+    if filters.operational_state is not None:
+        if isinstance(filters.operational_state, tuple):
+            params["operational_states"] = list(filters.operational_state)
+            clauses.append("b.operational_state=ANY(:operational_states)")
+        else:
+            params["operational_state"] = filters.operational_state
+            clauses.append("b.operational_state=:operational_state")
     if filters.source:
         params['source'] = filters.source
         clauses.append("EXISTS (SELECT 1 FROM source_identities si WHERE si.process_id=b.process_id AND si.source=:source)")

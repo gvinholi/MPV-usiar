@@ -807,15 +807,15 @@ Mesmo banco e schema dos commits anteriores. Sem event sourcing, CQRS distribuí
 
 **Contratos.** `application/read_model` define dataclasses imutáveis, filtros, paginação, erros, `ReadModelQueries` (Protocol) e fachada tipada `DashboardQueries`. `infra/database/read_model_store.py` implementa a porta; `read_model_sql.py` contém projeção comum/filtros SQL; `read_model_timeline.py` contém a união de eventos. Nenhum método da fachada chama serviços de escrita ou integrações. As consultas abrem transação PostgreSQL `REPEATABLE READ` e executam `SET TRANSACTION READ ONLY`. Até uma tentativa acidental de DML nessa transação é rejeitada pelo banco. Fechar a sessão encerra o snapshot sem commit de escrita.
 
-**Perfis.** Consultas com screening/resolution/review exigem `ProfileScope` com exatamente um `profile_id` ou `profile_code`. Code é aceito quando identifica uma única versão; se houver várias, `AmbiguousProfileError` exige id. Perfil inexistente gera `ProfileNotFoundError`. Não há USIAR hard-coded nem escolha implícita de versão ativa. Processo sem avaliação no perfil continua na lista, com campos de decisão nulos; dados de coleta/documentos não são atributos de perfil. Rodadas, documentos e cobertura de fonte não recebem perfil porque são globais.
+**Perfis.** Consultas com screening/resolution/review exigem `ProfileScope` com exatamente um `profile_id` ou `profile_code`. Code é aceito quando identifica uma única versão; se houver várias, `AmbiguousProfileError` exige id. Perfil inexistente gera `ProfileNotFoundError`. Não há USIAR hard-coded nem escolha implícita de versão ativa. Processo sem avaliação do perfil para a observação vigente continua na lista sem filtro de estado, com campos de decisão nulos; ele não herda classificação de observação anterior nem de outro perfil. Dados de coleta/documentos não são atributos de perfil. Rodadas, documentos e cobertura de fonte não recebem perfil porque são globais.
 
-**Estado atual.** Uma oportunidade por processo no perfil solicitado. Latest operational: `resolved_at DESC, created_at DESC, resolution_fingerprint DESC`, igual ao Commit 14. Latest human sobre essa resolução: `decided_at DESC, created_at DESC, sequence DESC`, igual ao Commit 15. Review histórica sem review vigente gera STALE e campos de decisão atuais nulos. A última review histórica aparece apenas no detalhe em campo separado. PENDING humano é REVIEWED. Filtros SELECTED usam exclusivamente a review vigente, nunca um histórico selecionado. A oportunidade também projeta `official_url` e `notice_number` do snapshot vigente; ambos permanecem nullable.
+**Estado atual.** Uma oportunidade por processo no perfil solicitado. A resolução precisa referenciar uma avaliação inicial da observação vigente; entre essas resoluções, latest operational usa `resolved_at DESC, created_at DESC, resolution_fingerprint DESC`. Se a observação mais recente ainda não foi triada no perfil, estado e resolução ficam nulos. Latest human sobre essa resolução usa `decided_at DESC, created_at DESC, sequence DESC`. Review histórica sem review vigente gera STALE e campos de decisão atuais nulos. A última review histórica aparece apenas no detalhe em campo separado. PENDING humano é REVIEWED. Filtros SELECTED usam exclusivamente a review vigente, nunca um histórico selecionado. A oportunidade também projeta `official_url`, `notice_number`, `rhs_id` e `monthly_value` do snapshot vigente; os dois últimos são nulos para PNCP enquanto não houver fonte oficial correspondente.
 
 Latest observation: `captured_at DESC NULLS LAST, created_at DESC, id DESC`. A lista mostra a identidade da fonte da observação; se houver múltiplos official_ids na mesma fonte, escolhe o menor lexicalmente. Detalhe lista todas as identidades. Processo sem observação tem campos de observação nulos, sem criar description/deadline/valor/URL. `publication_at` projeta `published_at`; `proposal_deadline_at` projeta `closes_at`; `uf` projeta `state`; `municipality_name` projeta `locality`. Não existe título separado de processo no schema: busca e preview usam description. Não foi inventado título.
 
 **Paginação e filtros.** `Pagination(page=1, page_size=25)`, page >= 1, tamanho 1..100, rejeita booleanos/fracionários. `Page` retorna tuple de items, page/page_size/total_items/total_pages; vazio tem zero páginas; página além do fim preserva total e retorna vazio. Lista, fila, documentos, evidências documentais, timeline e rodadas são paginadas no PostgreSQL. COUNT e página compartilham snapshot.
 
-Filtros: operational_state, human_review_status, human_decision, source (qualquer identidade do processo), UF, municipality/locality, modality, intervalos de publicação/deadline/captura, has_documents, has_text, has_document_screening e substring case-insensitive de description. `ILIKE` parametrizado, sem FTS; %, _ e ! do caller são escapados como caracteres literais. Filtros de localidade/modalidade são igualdade exata. Busca e strings de filtro têm teto de 300 caracteres. Datas sempre timezone-aware; intervalo fechado no início e aberto no fim. Filtro captured usa o captured_at da observação vigente, sem substituir null por created_at.
+Filtros: operational_state (um valor ou conjunto repetido), human_review_status, human_decision, source (qualquer identidade do processo), UF, municipality/locality, modality, intervalos de publicação/deadline/captura, has_documents, has_text, has_document_screening e substring case-insensitive de description. Estados múltiplos usam `ANY(:operational_states)` parametrizado no banco, antes de COUNT/LIMIT/OFFSET. `ILIKE` é parametrizado, sem FTS; %, _ e ! do caller são escapados como caracteres literais. Filtros de localidade/modalidade são igualdade exata. Busca e strings de filtro têm teto de 300 caracteres. Datas sempre timezone-aware; intervalo fechado no início e aberto no fim. Filtro captured usa o captured_at da observação vigente, sem substituir null por created_at.
 
 Sort fechado: publication_at, proposal_deadline_at, estimated_value, latest_capture_at, operational_resolved_at, reviewed_at; ASC/DESC. Default latest_capture_at DESC. NULLS LAST em ambas as direções e desempate por process_id ASC; nomes de coluna/direção não são SQL fornecido pelo caller. UUID é desempate de paginação, nunca critério de latest review. Timeline tem ordem própria ascendente, rodadas started_at descendente.
 
@@ -1490,3 +1490,46 @@ eram objetos sem climatização (veículos, implementos agrícolas, limpeza comu
 instalações elétricas e frete), antes preservados como ambíguos por termos genéricos.
 Não houve CANDIDATE nessas páginas; portanto essa amostra não demonstra recuperação de
 falso negativo nem mede recall. Nenhum dado da consulta foi persistido.
+
+---
+
+## 48. Projeção operacional de oportunidades para a dashboard
+
+O Commit 28 evolui `GET /api/v1/opportunities` sem criar endpoint paralelo. O parâmetro
+`operational_state` pode ser repetido; uma ocorrência preserva o contrato anterior e
+duas ocorrências permitem à tabela MVP solicitar `CANDIDATE` e `PENDING` em conjunto.
+A ausência do parâmetro preserva consumidores antigos, inclusive consultas que precisam
+ver `DISCARDED`. A chamada padrão da futura tabela deve enviar explicitamente os dois
+estados aceitos. A validação converte a lista para tuple deduplicada e rejeita estados
+desconhecidos ou conjunto vazio.
+
+No PostgreSQL, o predicado multiestado é `b.operational_state =
+ANY(:operational_states)`. O mesmo predicado alimenta o `COUNT` e a página, antes de
+`ORDER BY`, `LIMIT` e `OFFSET`; não existe filtragem posterior em memória. O desempate
+continua sendo `process_id ASC`, portanto paginação e ordenação permanecem
+determinísticas.
+
+Uma resolução só integra a projeção corrente quando seu `initial_evaluation_id`
+referencia uma avaliação do perfil solicitado para a observação mais recente do
+processo. Se a captura mais nova ainda não possui triagem v2, a linha sem filtro mantém
+os dados oficiais atuais, mas classificação, resolução e review vigente ficam nulas;
+o processo não aparece na consulta `CANDIDATE + PENDING`. Não há fallback para v1 ou
+para uma observação v2 antiga. Reviews anteriores permanecem auditáveis como históricos
+e podem sinalizar `STALE`, sem serem aplicadas à nova resolução.
+
+Para `USIAR/v2`, o frontend deve configurar exclusivamente
+`API_PROFILE_ID=42227c23-f6ea-5a43-b640-56ed6eb6981c` e deixar `API_PROFILE_CODE`
+vazio. O code `USIAR` não escolhe versão quando v1 e v2 coexistem.
+
+A resposta reutiliza `publication_at`, `organization_name`, `municipality_name`,
+`modality`, `official_url`, `notice_number`, `operational_state`,
+`operational_reason`, `estimated_value` e `description_preview`. Foram acrescentados
+somente `rhs_id` e `monthly_value`: para PNCP, ambos permanecem `null` quando a fonte
+oficial não fornece esses conceitos. `municipality_name` continua sendo a localidade da
+unidade compradora, não inferência do local de execução. `notice_number` não recebe
+`numeroCompra`. DATA e Hr são duas apresentações do mesmo `publication_at`; o read
+model não duplica o timestamp nem aplica fuso de apresentação.
+
+Autenticação `dashboard:read`, paginação 1..100, allowlist de ordenação, sanitização de
+URLs e erros permanecem inalterados. Não há migration, tabela Next.js, scheduler,
+exportação, administração ou integração adicional.

@@ -70,12 +70,18 @@ desabilitados por padrão. `API_DOCS_ENABLED=true` permite habilitação explíc
 que deve ser acompanhada da proteção de rede e identidade adequada à implantação.
 
 Exemplos de consulta (o perfil deve ser identificado por `profile_id` ou por um
-`profile_code` não ambíguo):
+`profile_code` não ambíguo). A tabela MVP deve selecionar `USIAR/v2` explicitamente e
+enviar `operational_state` duas vezes para combinar `CANDIDATE` e `PENDING`:
 
 ```text
-GET /api/v1/opportunities?profile_code=USIAR&page=1&page_size=25
+GET /api/v1/opportunities?profile_id=42227c23-f6ea-5a43-b640-56ed6eb6981c&operational_state=CANDIDATE&operational_state=PENDING&page=1&page_size=25
 GET /api/v1/opportunities/by-source?source=PNCP&official_id=00509968000148%2F2026%2F3341&profile_code=USIAR
 ```
+
+Um único `operational_state` continua aceito e a ausência do filtro preserva a
+listagem anterior, inclusive para consumidores que consultam descartes. O frontend do
+MVP deve sempre enviar os dois estados acima; o filtro é aplicado no PostgreSQL antes
+de `COUNT`, `LIMIT` e `OFFSET`.
 
 `AUTH_MODE` deve selecionar `oidc` ou `internal`. Para OIDC, configure:
 
@@ -229,6 +235,31 @@ após uma rodada v2 ter persistido o perfil e suas avaliações. O corpus versio
 em `collector/tests/application/screening/usiar_v2_corpus.json`; registros reais têm
 `official_id` e URL de origem, enquanto exemplos complementares são marcados como
 `synthetic`.
+
+### Projeção de oportunidades para a tabela UsiAr
+
+`GET /api/v1/opportunities` retorna uma linha por processo e usa a observação mais
+recente. A resolução operacional só é projetada quando pertence a essa observação e ao
+`profile_id` solicitado; uma observação nova ainda sem triagem v2 não reaproveita uma
+classificação antiga. A ordenação sempre termina em `process_id ASC`, mantendo páginas
+estáveis.
+
+| Coluna UsiAr | Campo do endpoint | Semântica |
+|---|---|---|
+| ID RHS | `rhs_id` | `null` para oportunidades PNCP. |
+| DATA / Hr | `publication_at` | Timestamp oficial; o frontend separa data e hora. |
+| ORGÃO | `organization_name` | Organização oficial informada. |
+| CIDADE | `municipality_name` | Município da unidade compradora; não implica local de execução. |
+| TIPO | `modality` | Modalidade oficial. |
+| SITE | `official_url` | URL pública validada, quando disponível. |
+| N EDITAL | `notice_number` | Campo oficial nullable; nunca usa `numeroCompra`. |
+| TIPO DO SERVIÇO | `operational_state` e `operational_reason` | Classificação auditável do perfil selecionado. |
+| VALOR MENSAL | `monthly_value` | `null` enquanto indisponível em fonte oficial. |
+| VALOR ESTIMADO | `estimated_value` | Valor estimado oficial, nullable. |
+| OBSERVAÇÃO | `description_preview` | Trecho da descrição oficial, sem texto inventado. |
+
+Os campos existentes foram reutilizados; apenas `rhs_id` e `monthly_value` foram
+acrescentados como nullable. Para obter o objeto integral, use o endpoint de detalhe.
 
 ### Campos oficiais para a aba UsiAr
 

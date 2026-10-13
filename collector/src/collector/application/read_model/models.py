@@ -46,6 +46,8 @@ class OpportunityListItem:
     has_text: bool
     has_document_screening: bool
     latest_capture_at: datetime | None
+    rhs_id: str | None = None
+    monthly_value: Decimal | None = None
 
 
 @dataclass(frozen=True)

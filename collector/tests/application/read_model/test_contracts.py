@@ -32,7 +32,8 @@ def test_pagination_and_immutable_dto():
 @pytest.mark.parametrize('kwargs', [dict(operational_state='SELECTED'), dict(human_decision='CANDIDATE'),
     dict(human_review_status='UNKNOWN'), dict(source='FAKE'), dict(uf='SAO'), dict(search=''),
     dict(search='x'*301), dict(has_text='true'), dict(has_documents=1), dict(captured='today'),
-    dict(review_queue='UNKNOWN'), dict(include_operational_discarded=1)])
+    dict(review_queue='UNKNOWN'), dict(include_operational_discarded=1),
+    dict(operational_state=()), dict(operational_state=('CANDIDATE', 'SELECTED'))])
 def test_invalid_filters(kwargs):
     with pytest.raises(ValueError):
         OpportunityFilters(**kwargs)
@@ -41,6 +42,8 @@ def test_invalid_filters(kwargs):
 def test_allowed_filters():
     assert OpportunityFilters(uf='sp', search='100%').uf == 'SP'
     assert OpportunityFilters(human_decision='SELECTED').human_decision.value == 'SELECTED'
+    states = OpportunityFilters(operational_state=('CANDIDATE', 'PENDING', 'CANDIDATE'))
+    assert states.operational_state == ('CANDIDATE', 'PENDING')
 
 
 @pytest.mark.parametrize('field', list(SortField))
