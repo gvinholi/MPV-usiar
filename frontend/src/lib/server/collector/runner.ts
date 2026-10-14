@@ -10,10 +10,14 @@ type RuntimeEnv = Partial<CloudflareEnv>;
 export type CollectionTrigger = "scheduled" | "manual";
 export type CollectionOptions = { trigger?: CollectionTrigger; leaseTtlSeconds?: number; heartbeatMs?: number };
 const LEASE_TTL_SECONDS = 120; const HEARTBEAT_MS = 30_000;
-type Outcome={modality:number;complete:boolean;expectedPages:number;pages:number;records:number;mapped:number;failedPage:number|null;reason:string|null;mappingErrors:{item_index:number;message:string}[]};
+export type Outcome={modality:number;complete:boolean;expectedPages:number;pages:number;records:number;mapped:number;failedPage:number|null;reason:string|null;mappingErrors:{item_index:number;message:string}[]};
 const log=(event:string,fields:Record<string,unknown>={})=>console.log(JSON.stringify({event,...fields}));
 const sha=(value:string)=>createHash("sha256").update(value,"utf8").digest("hex");
 function configuration(profile:Profile){return{context_terms:profile.terms.context,ambiguous_context_terms:profile.terms.ambiguous_context,excluded_context_terms:profile.terms.excluded_context,maintenance_terms:profile.terms.maintenance,sanitization_terms:profile.terms.sanitization,installation_terms:profile.terms.installation,purchase_terms:profile.terms.purchase,parts_terms:profile.terms.parts,association_window_tokens:profile.associationWindow??null};}
+export function serializeJsonb(value:unknown){const serialized=JSON.stringify(value);if(serialized===undefined)throw new Error("JSONB_SERIALIZATION_FAILED");return serialized;}
+export async function persistModalityOutcome(db:Pick<Client,"query">,roundId:string,outcome:Outcome,createdAt:string){
+  await db.query(`INSERT INTO collection_modality_outcomes(id,round_id,modality_code,complete,pages_processed,records_received,processes_mapped,failed_page,failure_reason,mapping_errors,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[randomUUID(),roundId,outcome.modality,outcome.complete,outcome.pages,outcome.records,outcome.mapped,outcome.failedPage,outcome.reason,serializeJsonb(outcome.mappingErrors),createdAt]);
+}
 // No Worker só o binding HYPERDRIVE é aceito; DATABASE_URL vale apenas para Node local e testes.
 function databaseConfig(env:RuntimeEnv){return postgresConfig({HYPERDRIVE:env.HYPERDRIVE,DATABASE_URL:env.DATABASE_URL},{applicationName:"usiar-collector-worker",requireHyperdrive:isWorkersRuntime()});}
 const rethrowLeaseLoss=(error:unknown)=>{if(error instanceof LeaseLostError)throw error;};
@@ -51,7 +55,7 @@ export async function runScheduledCollection(env:RuntimeEnv,transport:typeof fet
     const ensureHeld=()=>{if(held.lost)throw new LeaseLostError();};
     const orphans=await recoverOrphanRounds(db,held);if(orphans.length)log("collection_orphan_rounds_failed",{rounds:orphans});
     const profile=usiarV2;
-    await fenced(db,held,async()=>{await db.query("INSERT INTO screening_profiles(id,code,name,version,active,configuration,created_at) VALUES($1,$2,$3,$4,true,$5,$6) ON CONFLICT(code,version) DO NOTHING",[profile.id,profile.code,profile.name,profile.version,configuration(profile),startedAt]);
+    await fenced(db,held,async()=>{await db.query("INSERT INTO screening_profiles(id,code,name,version,active,configuration,created_at) VALUES($1,$2,$3,$4,true,$5,$6) ON CONFLICT(code,version) DO NOTHING",[profile.id,profile.code,profile.name,profile.version,serializeJsonb(configuration(profile)),startedAt]);
       await db.query(`INSERT INTO collection_rounds(id,source,started_at,status,pages_expected,pages_processed,pages_with_error,records_collected,unique_processes,candidates,selected,pending,discarded,documents_found,errors,created_at) VALUES($1,'PNCP',$2,'RUNNING',0,0,0,0,0,0,0,0,0,0,0,$2)`,[roundId,startedAt]);});
     const endDate=dateInSaoPaulo(now);const days=Math.max(1,Math.min(31,Number(env.COLLECTION_WINDOW_DAYS??2)));const startDate=plusDays(endDate,1-days);const modalities=(env.COLLECTION_MODALITIES??"").split(",").map(Number).filter((x)=>Number.isInteger(x)&&x>0);if(!modalities.length)throw new Error("COLLECTION_MODALITIES_REQUIRED");
     const pageSize=Math.max(10,Math.min(500,Number(env.COLLECTION_PAGE_SIZE??50)));const maxPages=Math.max(2,Math.min(10000,Number(env.COLLECTION_MAX_PAGES??200)));const timeoutMs=Math.max(1000,Math.min(300000,Number(env.COLLECTION_TIMEOUT_SECONDS??30)*1000));const attempts=Math.max(1,Math.min(10,Number(env.COLLECTION_RETRY_ATTEMPTS??3)));const deadline=Date.now()+14*60*1000;const outcomes:Outcome[]=[];
@@ -61,7 +65,7 @@ export async function runScheduledCollection(env:RuntimeEnv,transport:typeof fet
           if(outcome.reason==="worker_deadline")break;
           if(response.paginasRestantes===0){outcome.complete=outcome.mappingErrors.length===0;break;}if(page===maxPages)outcome.reason=`max_pages=${maxPages}`;
         }catch(error){rethrowLeaseLoss(error);outcome.failedPage=page;outcome.reason=error instanceof Error?error.message:"FETCH_ERROR";break;}}
-      outcomes.push(outcome);await fenced(db,held,()=>db.query(`INSERT INTO collection_modality_outcomes(id,round_id,modality_code,complete,pages_processed,records_received,processes_mapped,failed_page,failure_reason,mapping_errors,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[randomUUID(),roundId,modality,outcome.complete,outcome.pages,outcome.records,outcome.mapped,outcome.failedPage,outcome.reason,outcome.mappingErrors,new Date().toISOString()]));
+      outcomes.push(outcome);await fenced(db,held,()=>persistModalityOutcome(db,roundId,outcome,new Date().toISOString()));
     }
     const useful=outcomes.some((x)=>x.complete||x.records>0||x.mapped>0);const status=outcomes.every((x)=>x.complete)?"SUCCESS":useful?"PARTIAL":"FAILED";const errors=outcomes.reduce((n,x)=>n+(x.reason?1:0)+x.mappingErrors.length,0);
     await fenced(db,held,async()=>{const counts=await db.query(`SELECT count(DISTINCT o.process_id)::int unique_processes,count(*) FILTER(WHERE e.state='CANDIDATE')::int candidates,count(*) FILTER(WHERE e.state='PENDING')::int pending,count(*) FILTER(WHERE e.state='DISCARDED')::int discarded FROM process_observations o LEFT JOIN screening_evaluations e ON e.observation_id=o.id AND e.profile_id=$2 WHERE o.round_id=$1`,[roundId,profile.id]);
