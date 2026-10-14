@@ -12,3 +12,5 @@ playwright-report/
 *.log.*
 .env*
 !.env.example
+# Segredos locais do wrangler dev
+.dev.vars*

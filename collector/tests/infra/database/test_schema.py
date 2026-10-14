@@ -9,9 +9,17 @@ from sqlalchemy.orm import Session
 pytestmark = pytest.mark.postgres
 
 
-def test_expected_tables_exist(db_session: Session) -> None:
+@pytest.fixture
+def schema_session(admin_engine, db_session: Session):
+    """Catálogo visto pelo dono: information_schema oculta constraints de
+    tabelas em que a role só tem SELECT (modo USIAR_TEST_RUNTIME_ROLE)."""
+    with Session(admin_engine) as session:
+        yield session
+
+
+def test_expected_tables_exist(schema_session: Session) -> None:
     names = set(
-        db_session.execute(
+        schema_session.execute(
             text(
                 "SELECT table_name FROM information_schema.tables "
                 "WHERE table_schema = 'public'"
@@ -46,8 +54,8 @@ def test_expected_tables_exist(db_session: Session) -> None:
     assert "licitacoes" not in names
 
 
-def test_unique_constraints_exist(db_session: Session) -> None:
-    rows = db_session.execute(
+def test_unique_constraints_exist(schema_session: Session) -> None:
+    rows = schema_session.execute(
         text(
             "SELECT constraint_name FROM information_schema.table_constraints "
             "WHERE constraint_type = 'UNIQUE' AND table_schema = 'public'"
@@ -69,8 +77,8 @@ def test_unique_constraints_exist(db_session: Session) -> None:
     assert "uq_auth_sessions_verifier_digest" in names
 
 
-def test_foreign_keys_exist(db_session: Session) -> None:
-    rows = db_session.execute(
+def test_foreign_keys_exist(schema_session: Session) -> None:
+    rows = schema_session.execute(
         text(
             "SELECT constraint_name FROM information_schema.table_constraints "
             "WHERE constraint_type = 'FOREIGN KEY' AND table_schema = 'public'"
@@ -87,8 +95,8 @@ def test_foreign_keys_exist(db_session: Session) -> None:
     assert "fk_auth_audit_events_subject_user_id_auth_users" in names
 
 
-def test_official_notice_number_is_nullable(db_session: Session) -> None:
-    row = db_session.execute(
+def test_official_notice_number_is_nullable(schema_session: Session) -> None:
+    row = schema_session.execute(
         text(
             "SELECT is_nullable, data_type FROM information_schema.columns "
             "WHERE table_schema='public' AND table_name='process_observations' "

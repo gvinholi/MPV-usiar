@@ -3,7 +3,9 @@
 interface CloudflareEnv {
   ASSETS: Fetcher;
   WORKER_SELF_REFERENCE: Fetcher;
-  DATABASE_URL: string;
+  HYPERDRIVE: Hyperdrive;
+  /** Só Node local/testes. Em produção a conexão vem do HYPERDRIVE. */
+  DATABASE_URL?: string;
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   APP_ORIGIN: string;

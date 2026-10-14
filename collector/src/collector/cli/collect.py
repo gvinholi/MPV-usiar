@@ -144,7 +144,7 @@ def build_runner(
             SqlAlchemyOperationalResolutionRepository(session_factory)
         ),
         SqlAlchemyOperationalRunRepository(session_factory),
-        run_lock=SqlAlchemyOperationalRunLock(engine),
+        run_lock=SqlAlchemyOperationalRunLock(engine, session_factory),
     )
 
 

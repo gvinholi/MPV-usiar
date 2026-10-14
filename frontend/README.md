@@ -6,12 +6,13 @@ Next.js 16 App Router, React 19 e TypeScript strict sobre Cloudflare Workers/Ope
 
 - Supabase Auth fornece login por e-mail/senha, recuperação e cookies `HttpOnly`; signup público não existe.
 - `app_admins` é uma allowlist explícita. Criar um usuário no Supabase Auth não concede acesso ao sistema.
-- `DATABASE_URL` usa conexão direta ou o **Session Pooler** do Supabase. Hyperdrive e Transaction Pooler não podem ser usados pelo coletor porque não preservam o advisory lock de sessão.
+- No Worker, o banco é acessado só pelo binding **Hyperdrive** (`HYPERDRIVE` em `wrangler.jsonc`), com TLS `verify-full` contra a CA do Supabase e cache de consultas desligado. A credencial (role restrita `usiar_runtime`, Session Pooler na porta 5432) fica somente na configuração do Hyperdrive; o Worker não recebe `DATABASE_URL`. Passo a passo em [docs/SUPABASE.md](../docs/SUPABASE.md), seção 6.
+- A exclusão entre coletas usa o lease persistido `collection_leases` (migration 0013), com fencing token, compartilhado com o coletor Python. O advisory lock de sessão foi removido porque o Hyperdrive não garante afinidade de sessão entre consultas.
 - `custom-worker.ts` reutiliza o handler OpenNext e adiciona Cron às 09:00, 15:00 e 21:00 UTC (06:00, 12:00 e 18:00 em Brasília no regime atual).
 - O coletor persiste cada observação em transação própria, preserva snapshots e triagens existentes, e reporta teto/timeout como `PARTIAL`, nunca `SUCCESS` silencioso.
-- O Python permanece no repositório como rollback/referência e continua sendo a fonte das migrations Alembic 0001–0011.
+- O Python permanece no repositório como rollback/referência e continua sendo a fonte das migrations Alembic 0001–0013.
 
-Não coloque segredos em `.env.example`, `wrangler.jsonc` ou no Git. Configure `DATABASE_URL`, `SUPABASE_URL` e `SUPABASE_ANON_KEY` no ambiente do Worker. A service role é usada somente na estação administrativa para conceder a allowlist e nunca é configurada no Worker.
+Não coloque segredos em `.env.example`, `wrangler.jsonc` ou no Git. Configure `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `APP_ORIGIN` e `API_PROFILE_ID` no ambiente do Worker; o ID do Hyperdrive (não secreto) vai em `wrangler.jsonc`. O `localConnectionString` desse arquivo aponta só para o Postgres descartável local. A service role é usada somente na estação administrativa para conceder a allowlist e nunca é configurada no Worker.
 
 ```powershell
 cd frontend
@@ -25,11 +26,13 @@ npm.cmd run build:worker
 npm.cmd run preview:worker
 ```
 
-Após criar manualmente a única conta piloto no painel Supabase Auth, aplique a migration 0011 e conceda acesso sem conhecer ou transportar a senha:
+Após criar manualmente a única conta piloto no painel Supabase Auth, aplique as migrations até a 0013 e conceda acesso sem conhecer ou transportar a senha. `admin:grant` grava em `app_admins`, então `DATABASE_URL` aqui é a credencial **administrativa**, não a `usiar_runtime`:
 
 ```powershell
 $env:SUPABASE_SERVICE_ROLE_KEY = "<secret somente nesta sessão>"
-npm.cmd run admin:grant -- admin@empresa.example
+$env:DATABASE_CA_CERT = "<caminho do prod-ca-2021.crt>"   # o pooler usa CA privada; TLS sempre verificado
+npm.cmd run admin:grant -- admin@empresa.example --check   # só localiza o usuário; não grava
+npm.cmd run admin:grant -- admin@empresa.example           # grava em app_admins
 Remove-Item Env:SUPABASE_SERVICE_ROLE_KEY
 ```
 
@@ -41,7 +44,7 @@ O bundle OpenNext deve ser validado em Linux/CI. No Windows, o próprio adaptado
 
 ### Custo e limites do piloto
 
-O coletor não é compatível com os 10 ms de CPU e 50 subrequests externos por invocação do Workers Free. O piloto requer **Workers Paid**, atualmente com mínimo de US$ 5/mês, para obter o teto de Cron e subrequests compatíveis; ainda assim cada Cron tem 15 minutos de wall time e a medição real da coleta continua obrigatória. Supabase Free pode atender ao piloto inicial se o banco permanecer abaixo de 500 MB e das demais cotas do plano. Não há dependência de Hyperdrive, Durable Objects ou outro serviço pago adicional neste desenho.
+O coletor não é compatível com os 10 ms de CPU e 50 subrequests externos por invocação do Workers Free. O piloto requer **Workers Paid**, atualmente com mínimo de US$ 5/mês, para obter o teto de Cron e subrequests compatíveis; ainda assim cada Cron tem 15 minutos de wall time e a medição real da coleta continua obrigatória. Supabase Free pode atender ao piloto inicial se o banco permanecer abaixo de 500 MB e das demais cotas do plano. O Hyperdrive está incluído no Workers Free (100 mil consultas/dia) e no Paid, sem cobrança adicional; não há dependência de Durable Objects ou de outro serviço pago adicional neste desenho.
 
 ## Referência do runtime anterior
 

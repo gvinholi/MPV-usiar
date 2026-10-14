@@ -57,7 +57,7 @@ def test_alembic_upgrade_from_empty_database(postgres_url: str) -> None:
         assert "auth_users" in tables
         assert "auth_sessions" in tables
         assert "auth_audit_events" in tables
-        assert versions == ["0010_pncp_official_fields"]
+        assert versions == ["0013_collection_leases"]
 
         command.downgrade(config, "0009_internal_auth")
         with engine.begin() as connection:

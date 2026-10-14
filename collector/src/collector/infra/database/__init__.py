@@ -15,7 +15,10 @@ from collector.infra.database.internal_auth_store import (
 from collector.infra.database.operational_run_store import (
     SqlAlchemyOperationalRunRepository,
 )
-from collector.infra.database.operational_run_lock import SqlAlchemyOperationalRunLock
+from collector.infra.database.operational_run_lock import (
+    CollectionLeaseLostError,
+    SqlAlchemyOperationalRunLock,
+)
 from collector.infra.database.read_model_store import SqlAlchemyReadModelStore
 from collector.infra.database.resolution_store import (
     SqlAlchemyOperationalResolutionRepository,
@@ -38,6 +41,7 @@ __all__ = [
     "SqlAlchemyHumanReviewRepository",
     "SqlAlchemyInternalAuthRepository",
     "SqlAlchemyOperationalRunRepository",
+    "CollectionLeaseLostError",
     "SqlAlchemyOperationalRunLock",
     "SqlAlchemyOperationalResolutionRepository",
     "SqlAlchemyReadModelStore",

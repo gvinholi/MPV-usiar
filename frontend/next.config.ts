@@ -5,6 +5,9 @@ initOpenNextCloudflareForDev();
 
 const config: NextConfig = {
   poweredByHeader: false,
+  // pg usa pg-cloudflare (export só na condição `workerd`) para TCP no Worker.
+  // Externos aqui, o OpenNext os empacota com as condições do workerd.
+  serverExternalPackages: ["pg", "pg-cloudflare"],
   // Authorization codes/state in callback query strings must not enter dev logs.
   logging: { incomingRequests: false, browserToTerminal: false },
   async headers() {

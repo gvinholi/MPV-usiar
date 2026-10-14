@@ -1511,7 +1511,12 @@ determinísticas.
 
 Uma resolução só integra a projeção corrente quando seu `initial_evaluation_id`
 referencia uma avaliação do perfil solicitado para a observação mais recente do
-processo. Se a captura mais nova ainda não possui triagem v2, a linha sem filtro mantém
+processo, ou uma avaliação logicamente equivalente a ela (mesma engine, estado, reason e
+multiconjunto de evidências). Uma coleta repetida sem mudança cria nova observação e
+nova avaliação, mas não nova resolução (o fingerprint lógico já existe); a resolução e
+as reviews vigentes continuam valendo. Mudança real de classificação gera nova
+resolução, e a review anterior passa a `STALE`; voltar ao conteúdo original reaproveita
+a resolução original. Se a captura mais nova ainda não possui triagem v2, a linha sem filtro mantém
 os dados oficiais atuais, mas classificação, resolução e review vigente ficam nulas;
 o processo não aparece na consulta `CANDIDATE + PENDING`. Não há fallback para v1 ou
 para uma observação v2 antiga. Reviews anteriores permanecem auditáveis como históricos
@@ -1584,10 +1589,14 @@ para atraso do PNCP, rodada perdida, restart e virada de dia. Não é checkpoint
 garantia de cobertura temporal completa. `max_pages` continua sendo limite por
 modalidade e o scheduler rejeita valor 1; atingir o teto mantém `PARTIAL`.
 
-`SqlAlchemyOperationalRunLock` mantém `pg_try_advisory_lock` de sessão durante toda a
-coleta. O mesmo lock é injetado no runner manual e no daemon. Contenção falha rápido com
-código 4; fechamento da conexão libera o lock após sucesso ou exceção. Nenhuma migration
-ou tabela de scheduler foi adicionada.
+`SqlAlchemyOperationalRunLock` usava `pg_try_advisory_lock` de sessão; desde a 0013 ele
+adquire o lease persistido `collection_leases.PNCP_COLLECTION`, o mesmo do runner
+TypeScript (ver o parágrafo do coletor TS e `docs/SUPABASE.md`). O lock continua injetado
+no runner manual e no daemon e a contenção continua falhando rápido com código 4. Uma
+thread renova o lease; com `session_factory`, cada transação de sessão aberta durante a
+coleta começa com o fencing (`SELECT ... FOR SHARE`) e falha com
+`CollectionLeaseLostError` se o lease foi perdido. Um processo morto libera o lease pelo
+TTL.
 
 Logs JSON reutilizam `collection_rounds` e o resumo operacional. O resumo agora inclui
 páginas processadas e erros de página; retries em falhas transitórias registram tentativa,
@@ -1613,18 +1622,35 @@ exige service role fora do Worker. O código Python de autenticação permanece 
 repositório exclusivamente como rollback.
 
 A mesma migration habilita RLS sem criar políticas em todas as tabelas históricas da
-aplicação. Assim, `anon` e usuários Supabase não recebem acesso pela Data API; somente o
-runtime server-side, conectado diretamente como proprietário autorizado, consulta ou
-grava essas tabelas. O downgrade restaura o estado de RLS anterior.
+aplicação. Assim, `anon` e usuários Supabase não recebem acesso pela Data API. O downgrade
+restaura o estado de RLS anterior.
+
+A migration 0012 completa essa proteção: RLS em `alembic_version`, revogação de tabelas,
+sequências e funções de `public` para `anon`, `authenticated` e `service_role`, default
+privileges que não expõem objetos futuros e `search_path` fixo nas funções de trigger da
+0008. O runtime (API, coletor Python e Worker TypeScript) não usa a credencial de
+migrations: conecta como `usiar_runtime`, role sem `BYPASSRLS` nem DDL, criada por
+`collector/sql/runtime_role.sql` com GRANT por tabela/operação e políticas RLS
+explícitas. Procedimento, mapa de privilégios e formato das URLs em
+[SUPABASE.md](SUPABASE.md).
 
 O coletor TypeScript preserva o endpoint PNCP, 204 vazio, validação de metadados,
 paginação completa, retry transitório, mapeamento oficial, snapshots por rodada,
 identidade PNCP, triagem USIAR/v1 e v2, evidências, resolução inicial e reason codes.
 Cada observação confirmada é persistida em sua própria transação, preservando o progresso
-anterior quando uma linha falha, sem atualizar reviews humanas. O lock
-`pg_try_advisory_lock` é mantido numa conexão de sessão durante toda a rodada; por isso
-Hyperdrive e Transaction Pooler são incompatíveis. Deve-se usar conexão direta ou
-Supabase Session Pooler com TLS.
+anterior quando uma linha falha, sem atualizar reviews humanas.
+
+No Worker, a conexão vem só do binding Hyperdrive (`env.HYPERDRIVE`), que faz TLS
+`verify-full` até o Supabase com a CA do projeto e roda com cache desligado: sockets do
+Workers não aceitam CA própria, e o cache devolveria leituras velhas ao dashboard. Como o
+Hyperdrive agrupa conexões em modo transação, a exclusão da coleta deixou de ser um
+advisory lock de sessão e passou a ser o lease persistido da 0013: aquisição atômica por
+`UPDATE` condicional com `fencing_token` monotônico, heartbeat de 30 s numa conexão
+própria (TTL de 120 s), liberação condicionada a dono e token, e fencing em toda
+transação de gravação (`SELECT ... FOR SHARE` no próprio lease). Uma execução que perde o
+lease aborta com `COLLECTION_LEASE_LOST` sem gravar mais nada; a próxima fecha a rodada
+órfã como `FAILED`. O coletor Python disputa a mesma linha, então as duas implementações
+nunca coletam ao mesmo tempo.
 
 Os Crons são `0 9`, `0 15` e `0 21` UTC, correspondentes aos horários operacionais de
 Brasília no regime vigente. A janela de datas é calculada em `America/Sao_Paulo`.

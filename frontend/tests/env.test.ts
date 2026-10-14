@@ -30,6 +30,16 @@ describe("server configuration", () => {
     expect(testEnv({ API_PROFILE_ID: "invalid" }).API_PROFILE_ID).toBe("invalid");
     expect(testEnv({ API_PROFILE_ID: "a", API_PROFILE_CODE: "USIAR" })).toMatchObject({ API_PROFILE_ID: "a", API_PROFILE_CODE: "USIAR" });
   });
+  it("accepts production Supabase mode without a FastAPI origin, but not over HTTP", () => {
+    const production = { NODE_ENV: "production", AUTH_MODE: "supabase", APP_ORIGIN: "https://app.test",
+      DATABASE_URL: "postgresql://runtime@db.test:5432/postgres", SUPABASE_URL: "https://project.supabase.co", SUPABASE_ANON_KEY: "a".repeat(40) };
+    expect(readEnvironment(production)).toMatchObject({ configured: true, production: true, AUTH_MODE: "supabase" });
+    // Produção usa o binding HYPERDRIVE; DATABASE_URL não é exigido nem deve existir como secret.
+    expect(readEnvironment({ ...production, DATABASE_URL: undefined })).toMatchObject({ configured: true, production: true });
+    expect(() => readEnvironment({ ...production, APP_ORIGIN: "http://app.test" })).toThrow(ConfigurationError);
+    expect(() => readEnvironment({ ...production, SUPABASE_URL: "http://project.supabase.co" })).toThrow(ConfigurationError);
+    expect(() => readEnvironment({ ...production, AUTH_MODE: "oidc", OIDC_ISSUER: "https://issuer.test", OIDC_CLIENT_ID: "c", OIDC_CLIENT_AUTH_METHOD: "none" })).toThrow(ConfigurationError);
+  });
   it("does not silently use memory in production", () => {
     expect(() => new MemorySessionStore(1000, Date.now, "production")).toThrow();
     expect(() => readEnvironment({ NODE_ENV: "production", AUTH_MODE: "internal", AUTH_COOKIE_KEY: "A".repeat(43) })).toThrow();

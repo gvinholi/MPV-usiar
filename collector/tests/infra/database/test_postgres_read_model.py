@@ -150,8 +150,8 @@ def test_review_queue_parity(dataset):
     assert query.review_queue(scope,filters=F(include_operational_discarded=True)).total_items == 4
 
 
-def test_detail_lookup_not_found_and_no_large_list_text(dataset):
-    factory,store,query,scope,snapshots,*_ = dataset
+def test_detail_lookup_not_found_and_no_large_list_text(dataset,admin_engine):
+    _,store,query,scope,snapshots,*_ = dataset
     detail = query.get_opportunity_by_source_identity('PNCP','READ-0',scope)
     assert detail.opportunity.process_id == snapshots[0].id
     assert detail.initial_screening.evidence
@@ -163,7 +163,7 @@ def test_detail_lookup_not_found_and_no_large_list_text(dataset):
     with pytest.raises(OpportunityNotFoundError): query.get_opportunity_by_source_identity('PNCP','missing',scope)
     with pytest.raises(OpportunityNotFoundError): query.documents(uuid4())
     with pytest.raises(CollectionRoundNotFoundError): query.collection_round_detail(uuid4())
-    with factory.begin() as s:
+    with admin_engine.begin() as s:
         s.execute(text('UPDATE process_observations SET description=:description WHERE process_id=:id'),
                   {'description':'á'*5000,'id':snapshots[0].id})
     item = query.list_opportunities(scope,F(search='á')).items[0]
@@ -375,9 +375,9 @@ def test_all_sorts_deterministic(dataset,field,direction):
     assert values==sorted(values,reverse=direction==SortDirection.DESC)
 
 
-def test_missing_values_and_unsafe_urls_are_not_fabricated(dataset):
-    factory,_,query,scope,snapshots,*_=dataset
-    with factory.begin() as s:
+def test_missing_values_and_unsafe_urls_are_not_fabricated(dataset,admin_engine):
+    _,_,query,scope,snapshots,*_=dataset
+    with admin_engine.begin() as s:
         s.execute(text('''UPDATE process_observations SET estimated_value=NULL,closes_at=NULL,captured_at=NULL,
             official_url='http://127.0.0.1/storage?token=private' WHERE process_id=:id'''),{'id':snapshots[0].id})
     detail=query.get_opportunity(snapshots[0].id,scope)
@@ -467,14 +467,14 @@ def test_official_fields_are_read_from_persisted_snapshot(dataset):
     assert item.monthly_value is None
 
 
-def test_all_queries_preserve_persisted_rows(dataset):
-    factory,_,query,scope,snapshots,*_=dataset
+def test_all_queries_preserve_persisted_rows(dataset,admin_engine):
+    _,_,query,scope,snapshots,*_=dataset
     from sqlalchemy import inspect
     def contents():
-        with factory() as s:
-            names=inspect(s.connection()).get_table_names()
+        with admin_engine.connect() as s:
+            names=inspect(s).get_table_names()
             return {name: sorted(s.execute(text('SELECT row_to_json(t)::text FROM '+
-                    s.bind.dialect.identifier_preparer.quote(name)+' t')).scalars()) for name in names}
+                    s.dialect.identifier_preparer.quote(name)+' t')).scalars()) for name in names}
     before=contents()
     query.dashboard_summary(scope)
     query.list_opportunities(scope)

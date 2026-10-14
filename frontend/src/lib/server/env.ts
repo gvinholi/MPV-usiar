@@ -44,7 +44,9 @@ export function readEnvironment(raw: Record<string, string | undefined> = proces
     if (!["postgres:", "postgresql:"].includes(database.protocol) || !database.hostname) throw new ConfigurationError();
     const supabase = new URL(value.SUPABASE_URL);
     if (supabase.protocol !== "https:" && production && value.AUTH_MODE === "supabase") throw new ConfigurationError();
-    const api = secureOrigin(value.FASTAPI_BASE_URL, production);
+    // Supabase mode reads PostgreSQL directly and never calls FastAPI; only the
+    // modes that proxy to FastAPI must have a production-grade (HTTPS) origin.
+    const api = secureOrigin(value.FASTAPI_BASE_URL, production && value.AUTH_MODE !== "supabase");
     if (value.SESSION_IDLE_SECONDS > value.SESSION_ABSOLUTE_SECONDS) throw new ConfigurationError();
     let authCookieKey: Buffer | undefined;
     if (value.AUTH_MODE === "internal") {
@@ -58,7 +60,9 @@ export function readEnvironment(raw: Record<string, string | undefined> = proces
       if (new URL(value.OIDC_ISSUER).protocol !== "https:") throw new ConfigurationError();
       const scopes = value.OIDC_SCOPES.split(/\s+/); if (!scopes.includes("openid") || scopes.includes("offline_access")) throw new ConfigurationError();
     }
-    if (production && value.AUTH_MODE === "supabase" && (!raw.APP_ORIGIN || !raw.DATABASE_URL || !raw.SUPABASE_URL || !raw.SUPABASE_ANON_KEY)) throw new ConfigurationError();
+    // Em produção o banco vem do binding HYPERDRIVE (não é variável de ambiente);
+    // db.ts recusa conexão sem ele. DATABASE_URL não deve existir como secret.
+    if (production && value.AUTH_MODE === "supabase" && (!raw.APP_ORIGIN || !raw.SUPABASE_URL || !raw.SUPABASE_ANON_KEY)) throw new ConfigurationError();
     return { ...value, APP_ORIGIN: secureOrigin(value.APP_ORIGIN, production), FASTAPI_BASE_URL: api, production, configured: true, authCookieKey };
   } catch { throw new ConfigurationError(); }
 }

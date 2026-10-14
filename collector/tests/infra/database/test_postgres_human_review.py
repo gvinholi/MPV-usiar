@@ -266,12 +266,13 @@ def test_database_constraints(setup, change):
 
 
 @pytest.mark.parametrize("statement", ["UPDATE human_reviews SET comment = 'changed'", "DELETE FROM human_reviews"])
-def test_database_rejects_mutation(setup, statement):
-    factory, repo, _, resolution = setup
+def test_database_rejects_mutation(setup, admin_engine, statement):
+    _, repo, _, resolution = setup
     RecordHumanReview(repo).execute(cmd(resolution))
+    # O trigger barra até o dono da tabela; a role de runtime nem tem o GRANT.
     with pytest.raises(DBAPIError, match="append-only"):
-        with factory.begin() as session:
-            session.execute(text(statement))
+        with admin_engine.begin() as connection:
+            connection.execute(text(statement))
     assert repo.summary().reviews_total == 1
 
 

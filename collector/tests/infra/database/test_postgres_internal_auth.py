@@ -47,6 +47,13 @@ def repository(migrated_engine, db_session):
     return SqlAlchemyInternalAuthRepository(factory)
 
 
+@pytest.fixture
+def admin_repository(admin_engine, db_session):
+    """Bootstrap do primeiro usuário é operação da credencial administrativa."""
+    factory = sessionmaker(bind=admin_engine, autoflush=False, expire_on_commit=False)
+    return SqlAlchemyInternalAuthRepository(factory)
+
+
 def bootstrap(repository, email: str = "Admin@Example.COM") -> UUID:
     return BootstrapAdmin(repository, PasswordHasher(), clock=lambda: NOW).execute(
         email,
@@ -75,9 +82,9 @@ def test_catalog_contains_only_permissions_and_no_automatic_identity(
 
 
 def test_bootstrap_is_persistent_atomic_and_refuses_second_user(
-    repository, db_session
+    repository, db_session, admin_repository
 ) -> None:
-    user_id = bootstrap(repository)
+    user_id = bootstrap(admin_repository)
 
     user = repository.get_user_by_normalized_email("admin@example.com")
     assert user is not None
@@ -93,20 +100,21 @@ def test_bootstrap_is_persistent_atomic_and_refuses_second_user(
     assert audit == ("BOOTSTRAP_ADMIN", "SUCCESS", user_id, None)
 
     with pytest.raises(BootstrapAlreadyCompletedError):
-        bootstrap(repository, "second@example.com")
+        bootstrap(admin_repository, "second@example.com")
     assert repository.count_users() == 1
 
 
 def test_normalized_email_is_unique_at_database_boundary(
-    repository, db_session
+    repository, db_session, admin_repository, admin_engine
 ) -> None:
-    bootstrap(repository)
+    bootstrap(admin_repository)
     original = db_session.execute(text("SELECT * FROM auth_users")).mappings().one()
     duplicate = dict(original)
     duplicate.update(id=uuid4(), email="other@example.com")
 
-    with pytest.raises(IntegrityError), db_session.begin_nested():
-        db_session.execute(
+    # Inserir usuário é operação administrativa (fora do GRANT de runtime).
+    with pytest.raises(IntegrityError), admin_engine.begin() as connection:
+        connection.execute(
             text(
                 "INSERT INTO auth_users "
                 "(id,email,normalized_email,display_name,password_hash,password_version,active,"
@@ -118,8 +126,9 @@ def test_normalized_email_is_unique_at_database_boundary(
         )
 
 
-def test_session_attempt_and_audit_persistence(repository) -> None:
-    user_id = bootstrap(repository)
+def test_session_attempt_and_audit_persistence(repository, admin_repository
+) -> None:
+    user_id = bootstrap(admin_repository)
     session_id = uuid4()
     value = InternalSession(
         id=session_id,
@@ -183,6 +192,7 @@ def test_database_constraints_and_referential_integrity(
 def test_bootstrap_rolls_back_user_permissions_and_event_on_failure(
     repository,
     db_session,
+    admin_repository,
 ) -> None:
     conflicting_event_id = UUID("00000000-0000-0000-0000-000000000099")
     db_session.execute(
@@ -196,7 +206,7 @@ def test_bootstrap_rolls_back_user_permissions_and_event_on_failure(
     db_session.commit()
     ids = iter((UUID("00000000-0000-0000-0000-000000000098"), conflicting_event_id))
     service = BootstrapAdmin(
-        repository,
+        admin_repository,
         PasswordHasher(),
         clock=lambda: NOW,
         id_factory=lambda: next(ids),
@@ -219,9 +229,9 @@ def test_bootstrap_rolls_back_user_permissions_and_event_on_failure(
 
 
 def test_real_login_session_permissions_password_version_and_logout(
-    repository, db_session
+    repository, db_session, admin_repository, admin_engine
 ) -> None:
-    user_id = bootstrap(repository)
+    user_id = bootstrap(admin_repository)
     login = InternalLoginService(
         repository, PasswordHasher(), RateLimitKeyDeriver(RATE_KEY)
     )
@@ -242,14 +252,15 @@ def test_real_login_session_permissions_password_version_and_logout(
         text("SELECT last_login_at FROM auth_users WHERE id=:id"), {"id": user_id}
     ).scalar_one() == NOW + timedelta(minutes=1)
 
-    db_session.execute(
-        text(
-            "DELETE FROM auth_user_permissions "
-            "WHERE user_id=:id AND permission_code='reviews:write'"
-        ),
-        {"id": user_id},
-    )
     db_session.commit()
+    with admin_engine.begin() as connection:
+        connection.execute(
+            text(
+                "DELETE FROM auth_user_permissions "
+                "WHERE user_id=:id AND permission_code='reviews:write'"
+            ),
+            {"id": user_id},
+        )
     changed = sessions.authenticate(
         created.session_token, now=NOW + timedelta(minutes=3)
     )
@@ -330,9 +341,9 @@ def test_global_rate_limit_is_shared_across_identifiers(repository) -> None:
 
 
 def test_session_expiration_touch_interval_and_valid_csrf_mismatch(
-    repository, db_session
+    repository, db_session, admin_repository
 ) -> None:
-    bootstrap(repository)
+    bootstrap(admin_repository)
     login = InternalLoginService(
         repository, PasswordHasher(), RateLimitKeyDeriver(RATE_KEY)
     )
@@ -376,9 +387,9 @@ def test_session_expiration_touch_interval_and_valid_csrf_mismatch(
 
 
 def test_login_rehash_is_atomic_and_invalidates_older_password_version(
-    repository, db_session
+    repository, db_session, admin_repository
 ) -> None:
-    user_id = bootstrap(repository)
+    user_id = bootstrap(admin_repository)
     old_hash = RawArgon2PasswordHasher(
         time_cost=1,
         memory_cost=19 * 1024,
@@ -417,13 +428,12 @@ def test_login_rehash_is_atomic_and_invalidates_older_password_version(
 
 
 def test_internal_http_login_authorization_logout_and_replay(
-    migrated_engine, db_session
+    migrated_engine, db_session, admin_repository
 ) -> None:
     factory = sessionmaker(
         bind=migrated_engine, autoflush=False, expire_on_commit=False
     )
-    repository = SqlAlchemyInternalAuthRepository(factory)
-    bootstrap(repository)
+    bootstrap(admin_repository)
     api = TestClient(
         create_app(
             queries=object(),

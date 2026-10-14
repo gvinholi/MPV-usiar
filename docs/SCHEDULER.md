@@ -97,10 +97,13 @@ falha reinicia da página 1 na próxima tentativa. Se todas as páginas não cou
 `COLLECTION_MAX_PAGES`, a rodada é `PARTIAL`, nunca `SUCCESS`. O operador deve ampliar a
 janela/limite de forma controlada ou executar backfill.
 
-O lock usa `pg_try_advisory_lock` em uma conexão dedicada durante toda a operação. Ele é
-compartilhado pelo daemon e por `collector.cli.collect`; concorrência retorna código 4 e
-não espera. Fechamento da conexão libera o lock mesmo após falha; há também unlock
-explícito no caminho normal.
+O lock é o lease persistido `collection_leases.PNCP_COLLECTION` (migration 0013),
+compartilhado pelo daemon, por `collector.cli.collect` e pelo Cron do Worker;
+concorrência retorna código 4 e não espera. O lease é renovado a cada 30 s e expira em
+120 s sem renovação, então um processo morto não bloqueia a próxima rodada por mais que
+isso. A liberação no caminho normal é condicionada ao dono e ao fencing token. Gravações
+de uma execução que perdeu o lease são recusadas (`CollectionLeaseLostError`), e a
+execução seguinte fecha como `FAILED` a rodada que ficou `RUNNING`.
 
 ## Logs, resultado e recuperação
 

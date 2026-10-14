@@ -9,13 +9,27 @@ BASE = """
 WITH observations AS (
  SELECT o.*, row_number() OVER (PARTITION BY process_id ORDER BY captured_at DESC NULLS LAST, created_at DESC, id DESC) rn
  FROM process_observations o
+), current_evaluations AS (
+ SELECT e.* FROM screening_evaluations e
+ JOIN observations current_o ON current_o.id=e.observation_id AND current_o.rn=1
+ WHERE e.profile_id = :profile_id
 ), resolutions AS (
+ -- Current when its initial evaluation is the latest observation's evaluation or logically
+ -- equivalent to it (engine, state, reason, evidence): an identical re-collection keeps the
+ -- existing resolution, whose fingerprint already covers that content.
  SELECT r.*, row_number() OVER (PARTITION BY r.process_id, r.profile_id ORDER BY r.resolved_at DESC, r.created_at DESC, r.resolution_fingerprint DESC) rn
  FROM operational_resolutions r
  JOIN screening_evaluations e ON e.id=r.initial_evaluation_id
- JOIN observations current_o ON current_o.process_id=r.process_id AND current_o.rn=1
-                            AND current_o.id=e.observation_id
  WHERE r.profile_id = :profile_id
+   AND EXISTS (SELECT 1 FROM current_evaluations c WHERE c.process_id=r.process_id AND (c.id=e.id OR (
+     c.engine_version=e.engine_version AND c.state=e.state AND c.reason_code=e.reason_code
+     AND (SELECT string_agg(format('%L,%L,%L,%L', x.category, x.configured_term, x.field, x.matched_text), ';'
+                            ORDER BY x.category, x.configured_term, x.field, x.matched_text)
+          FROM screening_evidence x WHERE x.evaluation_id=c.id)
+         IS NOT DISTINCT FROM
+         (SELECT string_agg(format('%L,%L,%L,%L', x.category, x.configured_term, x.field, x.matched_text), ';'
+                            ORDER BY x.category, x.configured_term, x.field, x.matched_text)
+          FROM screening_evidence x WHERE x.evaluation_id=e.id))))
 ), reviews AS (
  SELECT h.*, row_number() OVER (PARTITION BY operational_resolution_id ORDER BY decided_at DESC, created_at DESC, sequence DESC) rn
  FROM human_reviews h

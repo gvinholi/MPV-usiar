@@ -4,6 +4,7 @@
 !.env.example
 *.dump
 *.sql.gz
+db.env
 
 # Python
 .venv/
@@ -35,3 +36,6 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# CA publica do Supabase (validada localmente; nao versionar certificados)
+docs/prod-ca-2021.crt

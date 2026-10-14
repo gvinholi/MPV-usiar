@@ -6,8 +6,21 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "usiar-mvp" }],
-  "triggers": { "crons": ["0 9 * * *", "0 15 * * *", "0 21 * * *"] },
+  // Hyperdrive "usiar-db": TLS verify-full até o Supabase com a CA do projeto
+  // (usiar-supabase-ca), cache desligado e 10 conexões de origem (docs/SUPABASE.md).
+  // O id não é segredo; a credencial fica só no Cloudflare.
+  // localConnectionString é o Postgres descartável local (wrangler dev / next dev).
+  "hyperdrive": [{
+    "binding": "HYPERDRIVE",
+    "id": "76711eb9b0964825be677011589cee32",
+    "localConnectionString": "postgresql://usiar:usiar@127.0.0.1:5432/usiar"
+  }],
+  // Crons DESATIVADOS na publicação inicial (etapa 3). Horários aprovados, a religar
+  // após a validação: "0 9 * * *", "0 15 * * *", "0 21 * * *" (UTC = 06/12/18h BRT).
+  // "crons": [] remove os gatilhos já publicados; o handler scheduled continua no código.
+  "triggers": { "crons": [] },
   "vars": {
+    "COLLECTION_MODALITIES": "6,8",
     "COLLECTION_UF": "SP",
     "COLLECTION_PROFILE": "USIAR/v2",
     "COLLECTION_WINDOW_DAYS": "2",
