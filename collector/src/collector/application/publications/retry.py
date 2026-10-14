@@ -9,6 +9,7 @@ from time import sleep
 from collector.application.publications.errors import TransientFetchError
 
 Waiter = Callable[[float], None]
+RetryObserver = Callable[[int, float, TransientFetchError], None]
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,12 @@ def default_waiter(seconds: float) -> None:
     sleep(seconds)
 
 
-def retry_call(operation: Callable[[], object], policy: RetryPolicy, waiter: Waiter) -> object:
+def retry_call(
+    operation: Callable[[], object],
+    policy: RetryPolicy,
+    waiter: Waiter,
+    observer: RetryObserver | None = None,
+) -> object:
     delay = policy.initial_delay_seconds
     last_error: TransientFetchError | None = None
     for attempt in range(1, policy.max_attempts + 1):
@@ -41,6 +47,8 @@ def retry_call(operation: Callable[[], object], policy: RetryPolicy, waiter: Wai
             last_error = exc
             if attempt >= policy.max_attempts:
                 raise
+            if observer is not None:
+                observer(attempt, delay, exc)
             waiter(delay)
             delay = min(delay * policy.backoff_factor, policy.max_delay_seconds)
     raise last_error  # pragma: no cover

@@ -42,6 +42,8 @@ class OperationalRunSummary:
     pending: int
     discarded: int
     errors: int
+    pages_processed: int = 0
+    page_errors: int = 0
 
     def as_dict(self) -> dict[str, object]:
         payload = asdict(self)

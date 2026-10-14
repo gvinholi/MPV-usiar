@@ -200,9 +200,35 @@ Repetir internamente a persistência da mesma rodada é idempotente. Uma nova ex
 comando cria uma nova rodada e novas observações históricas, reutilizando a identidade
 dos processos; revisões humanas anteriores não são sobrescritas. Ainda não há
 checkpoint entre execuções: após uma interrupção, um novo comando reinicia a paginação
-na página 1 e a deduplicação protege os processos. O agendamento das três rodadas
-diárias permanece fora deste comando e deve invocá-lo externamente em horários
-aprovados.
+na página 1 e a deduplicação protege os processos. O comando manual não agenda novas
+rodadas; essa responsabilidade pertence ao daemon explícito descrito abaixo.
+
+### Agendamento operacional (desativado por padrão)
+
+O projeto inclui um daemon explícito, compatível com o ambiente Python/PostgreSQL atual,
+sem presumir Cloud Run, VPS ou systemd. Ele agenda três rodadas por dia em
+`America/Sao_Paulo`, usa janela móvel sobreposta e aplica sempre `USIAR/v2`. O daemon
+somente inicia quando `COLLECTION_SCHEDULER_ENABLED=true`; nenhuma implantação ou tarefa
+do sistema operacional é criada automaticamente.
+
+```powershell
+cd collector
+$env:DATABASE_URL = "postgresql+psycopg://usiar:usiar@localhost:5433/usiar"
+$env:COLLECTION_MODALITIES = "6,8" # exemplo; confirme os códigos PNCP vigentes
+python -m collector.cli.schedule show-config
+python -m collector.cli.schedule run-once
+
+# Somente após aprovação da implantação:
+$env:COLLECTION_SCHEDULER_ENABLED = "true"
+python -m collector.cli.schedule daemon
+```
+
+Os horários padrão são `06:00`, `12:00` e `18:00`, configuráveis por
+`COLLECTION_SCHEDULE_TIMES`. O lock consultivo PostgreSQL impede sobreposição entre o
+daemon, outra réplica e o runner manual; uma tentativa concorrente não espera nem inicia
+uma segunda rodada. Não existe checkpoint de página: falhas são recuperadas por nova
+consulta desde a página 1 dentro da janela sobreposta, com deduplicação persistente.
+Consulte o procedimento completo em [docs/SCHEDULER.md](docs/SCHEDULER.md).
 
 ### Triagem contextual USIAR/v2
 

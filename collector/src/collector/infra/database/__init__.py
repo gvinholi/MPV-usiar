@@ -15,6 +15,7 @@ from collector.infra.database.internal_auth_store import (
 from collector.infra.database.operational_run_store import (
     SqlAlchemyOperationalRunRepository,
 )
+from collector.infra.database.operational_run_lock import SqlAlchemyOperationalRunLock
 from collector.infra.database.read_model_store import SqlAlchemyReadModelStore
 from collector.infra.database.resolution_store import (
     SqlAlchemyOperationalResolutionRepository,
@@ -23,6 +24,7 @@ from collector.infra.database.screening_store import SqlAlchemyScreeningReposito
 from collector.infra.database.session import (
     create_engine_from_url,
     create_session_factory,
+    create_session_factory_from_engine,
 )
 from collector.infra.database.store import SqlAlchemyCollectionRepository
 from collector.infra.database.text_store import SqlAlchemyTextExtractionRepository
@@ -36,11 +38,13 @@ __all__ = [
     "SqlAlchemyHumanReviewRepository",
     "SqlAlchemyInternalAuthRepository",
     "SqlAlchemyOperationalRunRepository",
+    "SqlAlchemyOperationalRunLock",
     "SqlAlchemyOperationalResolutionRepository",
     "SqlAlchemyReadModelStore",
     "SqlAlchemyScreeningRepository",
     "SqlAlchemyTextExtractionRepository",
     "create_engine_from_url",
     "create_session_factory",
+    "create_session_factory_from_engine",
     "database_url",
 ]

@@ -13,8 +13,12 @@ def create_engine_from_url(url: str | None = None) -> Engine:
 
 
 def create_session_factory(url: str | None = None) -> sessionmaker[Session]:
+    return create_session_factory_from_engine(create_engine_from_url(url))
+
+
+def create_session_factory_from_engine(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(
-        bind=create_engine_from_url(url),
+        bind=engine,
         autoflush=False,
         expire_on_commit=False,
     )

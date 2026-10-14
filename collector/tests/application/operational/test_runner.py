@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 
 import pytest
@@ -8,6 +9,7 @@ from collector.application import (
     CollectionIssue,
     CollectionRequest,
     OperationalCollectionRunner,
+    OperationalRunAlreadyRunningError,
     PersistCollection,
     PersistOperationalResolution,
     PersistScreening,
@@ -17,7 +19,7 @@ from collector.application import (
     usiar_v2,
 )
 from collector.application.persistence.errors import PersistenceError
-from collector.domain import RoundStatus
+from collector.domain import RoundMetrics, RoundStatus
 from tests.application.persistence.factories import (
     collection_result,
     outcome,
@@ -76,7 +78,7 @@ def _request(*modalities):
     )
 
 
-def _runner(result):
+def _runner(result, *, run_lock=None):
     collections = InMemoryCollectionRepository()
     screenings = InMemoryScreeningRepository()
     resolutions = InMemoryResolutionRepository()
@@ -87,8 +89,26 @@ def _runner(result):
         PersistScreening(screenings),
         PersistOperationalResolution(resolutions),
         operational,
+        run_lock=run_lock,
     )
     return runner, collections, screenings, resolutions, operational
+
+
+def test_busy_lock_prevents_collection_from_starting():
+    @contextmanager
+    def busy():
+        yield False
+
+    class BusyLock:
+        acquire = staticmethod(busy)
+
+    result = collection_result(process("blocked"))
+    runner, collections, *_ = _runner(result, run_lock=BusyLock())
+
+    with pytest.raises(OperationalRunAlreadyRunningError):
+        runner.run(_request(6), usiar_v2())
+
+    assert collections.rounds == {}
 
 
 def test_success_screens_candidate_pending_and_discarded_and_updates_metrics():
@@ -148,6 +168,13 @@ def test_partial_round_and_multiple_modalities_are_preserved():
                 failure_reason="timeout",
             ),
         ),
+        metrics=RoundMetrics(
+            pages_processed=2,
+            pages_with_error=1,
+            records_collected=1,
+            unique_processes=1,
+            errors=1,
+        ),
     )
     result = replace(
         result,
@@ -161,6 +188,8 @@ def test_partial_round_and_multiple_modalities_are_preserved():
     assert summary.completed_modalities == (6,)
     assert summary.incomplete_modalities == (8,)
     assert summary.errors == 1
+    assert summary.pages_processed == 2
+    assert summary.page_errors == 1
     assert summary.candidates == 1
 
 
@@ -189,6 +218,8 @@ def test_invalid_publication_is_reported_without_losing_valid_processes():
 
     assert summary.status == "PARTIAL"
     assert summary.errors == 1
+    assert summary.pages_processed == 1
+    assert summary.page_errors == 0
     assert summary.unique_processes == 1
     assert summary.candidates == 1
 
@@ -208,6 +239,13 @@ def test_failed_round_is_not_reported_as_empty_success():
             ),
         ),
         raw_processes=(),
+        metrics=RoundMetrics(
+            pages_processed=0,
+            pages_with_error=1,
+            records_collected=0,
+            unique_processes=0,
+            errors=1,
+        ),
     )
     result = replace(
         result,
@@ -220,6 +258,8 @@ def test_failed_round_is_not_reported_as_empty_success():
     assert summary.status == "FAILED"
     assert summary.records_collected == 0
     assert summary.errors == 1
+    assert summary.pages_processed == 0
+    assert summary.page_errors == 1
     assert summary.completed_modalities == ()
     assert summary.incomplete_modalities == (6,)
 

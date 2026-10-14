@@ -1416,8 +1416,8 @@ Identidades, unicidades e histórico continuam sob os contratos de persistência
 definidos. Reprocessar a mesma rodada não duplica observações, avaliações ou resoluções.
 Executar novamente o comando cria outra rodada e preserva as anteriores, bem como as
 revisões humanas. Não há checkpoint persistente de página: uma nova execução começa na
-página 1. Também não há scheduler neste componente; três rodadas diárias devem ser
-disparadas por infraestrutura externa em commit próprio.
+página 1. O runner continua sem agendamento embutido; o daemon operacional separado da
+seção 50 é quem o invoca nos três horários configurados.
 
 ---
 
@@ -1567,3 +1567,29 @@ O segmento possui loading próprio. Resultado vazio da consulta padrão informa 
 primeira coleta ainda não produziu oportunidades; erros preservam a semântica da API e
 oferecem nova tentativa. Resposta 401 invalida a sessão conforme o modo existente e
 redireciona para `/login?error=session`.
+
+---
+
+## 50. Agendamento operacional PNCP
+
+Sem plataforma de produção definida, o scheduler é um daemon Python explícito e
+desativado por padrão. `DailyCollectionSchedule` calcula três ocorrências locais e a
+janela sobreposta sem conhecer HTTP ou PostgreSQL. A CLI valida ambiente e compõe o
+runner existente com timeout/retry configuráveis; não existe coleta em importação nem
+registro automático em cron, Task Scheduler, systemd ou serviço cloud.
+
+Cada ocorrência usa datas locais em `America/Sao_Paulo`, percorre as modalidades
+configuradas desde a página 1 e força USIAR/v2. O default de dois dias é uma mitigação
+para atraso do PNCP, rodada perdida, restart e virada de dia. Não é checkpoint nem
+garantia de cobertura temporal completa. `max_pages` continua sendo limite por
+modalidade e o scheduler rejeita valor 1; atingir o teto mantém `PARTIAL`.
+
+`SqlAlchemyOperationalRunLock` mantém `pg_try_advisory_lock` de sessão durante toda a
+coleta. O mesmo lock é injetado no runner manual e no daemon. Contenção falha rápido com
+código 4; fechamento da conexão libera o lock após sucesso ou exceção. Nenhuma migration
+ou tabela de scheduler foi adicionada.
+
+Logs JSON reutilizam `collection_rounds` e o resumo operacional. O resumo agora inclui
+páginas processadas e erros de página; retries em falhas transitórias registram tentativa,
+delay, tipo e status HTTP, sem mensagem bruta. O procedimento de ativação, recuperação,
+backfill e limites geográficos está em `docs/SCHEDULER.md`.

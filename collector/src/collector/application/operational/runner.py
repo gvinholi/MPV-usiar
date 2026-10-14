@@ -19,7 +19,12 @@ from collector.application.screening import (
 from collector.domain import ScreeningStatus
 
 from .models import OperationalRunSummary, ScreeningMetrics
-from .ports import OperationalRunRepository
+from .errors import OperationalRunAlreadyRunningError
+from .ports import (
+    OperationalRunLock,
+    OperationalRunRepository,
+    UnlockedOperationalRunLock,
+)
 
 Logger = logging.Logger
 
@@ -35,6 +40,7 @@ class OperationalCollectionRunner:
         *,
         screening_engine: ScreeningEngine | None = None,
         resolver: OperationalResolver | None = None,
+        run_lock: OperationalRunLock | None = None,
         logger: Logger | None = None,
     ) -> None:
         self._collector = collector
@@ -44,9 +50,21 @@ class OperationalCollectionRunner:
         self._operational_repository = operational_repository
         self._screening_engine = screening_engine or ScreeningEngine()
         self._resolver = resolver or OperationalResolver()
+        self._run_lock = run_lock or UnlockedOperationalRunLock()
         self._logger = logger or logging.getLogger(__name__)
 
     def run(
+        self, request: CollectionRequest, profile: ScreeningProfile
+    ) -> OperationalRunSummary:
+        with self._run_lock.acquire() as acquired:
+            if not acquired:
+                self._event("collection_skipped", reason="already_running")
+                raise OperationalRunAlreadyRunningError(
+                    "outra rodada operacional já está em execução"
+                )
+            return self._run_locked(request, profile)
+
+    def _run_locked(
         self, request: CollectionRequest, profile: ScreeningProfile
     ) -> OperationalRunSummary:
         self._event(
@@ -66,6 +84,8 @@ class OperationalCollectionRunner:
             records_collected=result.records_received,
             unique_processes=result.consolidation.unique_processes,
             errors=len(result.errors),
+            pages_processed=result.collection_round.metrics.pages_processed,
+            page_errors=result.collection_round.metrics.pages_with_error,
         )
 
         persisted = self._collection_persistence.persist(result)
@@ -123,6 +143,8 @@ class OperationalCollectionRunner:
             pending=metrics.pending,
             discarded=metrics.discarded,
             errors=len(result.errors),
+            pages_processed=result.collection_round.metrics.pages_processed,
+            page_errors=result.collection_round.metrics.pages_with_error,
         )
         self._event("operational_run_finished", **summary.as_dict())
         return summary

@@ -10,8 +10,17 @@ from collector.application.publications.errors import (
 )
 from collector.application.publications.ports import PublicationPageFetcher
 from collector.application.publications.query import PublicationQuery
-from collector.application.publications.results import PublicationCollection, PublicationPage
-from collector.application.publications.retry import RetryPolicy, Waiter, default_waiter, retry_call
+from collector.application.publications.results import (
+    PublicationCollection,
+    PublicationPage,
+)
+from collector.application.publications.retry import (
+    RetryObserver,
+    RetryPolicy,
+    Waiter,
+    default_waiter,
+    retry_call,
+)
 
 DEFAULT_MAX_PAGES = 200
 
@@ -33,9 +42,7 @@ def _metadata_issue(
     seen_pages: set[int],
 ) -> str | None:
     if page.numero_pagina != requested_page:
-        return (
-            f"página retornada {page.numero_pagina} difere da solicitada {requested_page}"
-        )
+        return f"página retornada {page.numero_pagina} difere da solicitada {requested_page}"
     if page.numero_pagina in seen_pages:
         return f"página {page.numero_pagina} repetida"
     if page.total_paginas > 0:
@@ -67,6 +74,7 @@ class PublicationPaginator:
         retry_policy: RetryPolicy | None = None,
         max_pages: int = DEFAULT_MAX_PAGES,
         waiter: Waiter = default_waiter,
+        retry_observer: RetryObserver | None = None,
     ) -> None:
         if max_pages < 1:
             raise ValueError("max_pages deve ser >= 1")
@@ -74,6 +82,7 @@ class PublicationPaginator:
         self._retry_policy = retry_policy or RetryPolicy()
         self._max_pages = max_pages
         self._waiter = waiter
+        self._retry_observer = retry_observer
 
     def collect(self, query: PublicationQuery) -> PublicationCollection:
         items: list[Mapping[str, object]] = []
@@ -112,9 +121,7 @@ class PublicationPaginator:
                     ),
                 )
 
-            issue = _metadata_issue(
-                page, requested, previous_total_paginas, seen_pages
-            )
+            issue = _metadata_issue(page, requested, previous_total_paginas, seen_pages)
             if issue is not None:
                 raise IncompleteCollectionError(
                     issue,
@@ -157,7 +164,12 @@ class PublicationPaginator:
         def operation() -> PublicationPage:
             return self._fetcher.fetch_page(query, page)
 
-        return retry_call(operation, self._retry_policy, self._waiter)  # type: ignore[return-value]
+        return retry_call(  # type: ignore[return-value]
+            operation,
+            self._retry_policy,
+            self._waiter,
+            self._retry_observer,
+        )
 
 
 def _complete(

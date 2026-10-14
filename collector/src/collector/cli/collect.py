@@ -12,10 +12,12 @@ from collector.application import (
     CollectionOrchestrator,
     CollectionRequest,
     OperationalCollectionRunner,
+    OperationalRunAlreadyRunningError,
     PersistCollection,
     PersistOperationalResolution,
     PersistScreening,
     PublicationPaginator,
+    RetryPolicy,
     usiar_v1,
     usiar_v2,
 )
@@ -23,8 +25,10 @@ from collector.infra.database import (
     SqlAlchemyCollectionRepository,
     SqlAlchemyOperationalResolutionRepository,
     SqlAlchemyOperationalRunRepository,
+    SqlAlchemyOperationalRunLock,
     SqlAlchemyScreeningRepository,
-    create_session_factory,
+    create_engine_from_url,
+    create_session_factory_from_engine,
 )
 from collector.infra.pncp import (
     PncpClient,
@@ -36,6 +40,7 @@ RunnerFactory = Callable[[int], OperationalCollectionRunner]
 EXIT_SUCCESS = 0
 EXIT_FAILED = 1
 EXIT_PARTIAL = 3
+EXIT_ALREADY_RUNNING = 4
 
 
 def _date(value: str) -> date:
@@ -84,9 +89,7 @@ def parser() -> argparse.ArgumentParser:
         dest="modalities",
         help="Código PNCP. Repita a opção para múltiplas modalidades.",
     )
-    run.add_argument(
-        "--profile", choices=("USIAR/v1", "USIAR/v2"), default="USIAR/v1"
-    )
+    run.add_argument("--profile", choices=("USIAR/v1", "USIAR/v2"), default="USIAR/v1")
     run.add_argument(
         "--page-size",
         type=_positive_int,
@@ -101,10 +104,36 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
-def build_runner(max_pages: int) -> OperationalCollectionRunner:
-    session_factory = create_session_factory()
+def _retry_event(attempt: int, delay: float, error: Exception) -> None:
+    logging.getLogger(__name__).warning(
+        json.dumps(
+            {
+                "event": "pncp_retry_scheduled",
+                "attempt": attempt,
+                "delay_seconds": delay,
+                "exception_type": type(error).__name__,
+                "status_code": getattr(error, "status_code", None),
+            },
+            sort_keys=True,
+        )
+    )
+
+
+def build_runner(
+    max_pages: int,
+    *,
+    timeout_seconds: float = 30.0,
+    retry_policy: RetryPolicy | None = None,
+) -> OperationalCollectionRunner:
+    engine = create_engine_from_url()
+    session_factory = create_session_factory_from_engine(engine)
     collector = CollectionOrchestrator(
-        PublicationPaginator(PncpPublicationFetcher(PncpClient()), max_pages=max_pages),
+        PublicationPaginator(
+            PncpPublicationFetcher(PncpClient(timeout_seconds=timeout_seconds)),
+            max_pages=max_pages,
+            retry_policy=retry_policy,
+            retry_observer=_retry_event,
+        ),
         PncpPublicationMapper(),
     )
     return OperationalCollectionRunner(
@@ -115,6 +144,7 @@ def build_runner(max_pages: int) -> OperationalCollectionRunner:
             SqlAlchemyOperationalResolutionRepository(session_factory)
         ),
         SqlAlchemyOperationalRunRepository(session_factory),
+        run_lock=SqlAlchemyOperationalRunLock(engine),
     )
 
 
@@ -144,6 +174,14 @@ def main(
             ),
             {"USIAR/v1": usiar_v1, "USIAR/v2": usiar_v2}[arguments.profile](),
         )
+    except OperationalRunAlreadyRunningError:
+        logging.getLogger(__name__).warning(
+            json.dumps(
+                {"event": "operational_run_skipped", "reason": "already_running"},
+                sort_keys=True,
+            )
+        )
+        return EXIT_ALREADY_RUNNING
     except Exception as exc:  # noqa: BLE001 - CLI sanitiza a falha operacional
         logging.getLogger(__name__).error(
             json.dumps(

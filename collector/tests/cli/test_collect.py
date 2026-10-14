@@ -5,8 +5,11 @@ from uuid import uuid4
 
 import pytest
 
-from collector.application import OperationalRunSummary
-from collector.cli.collect import main
+from collector.application import (
+    OperationalRunAlreadyRunningError,
+    OperationalRunSummary,
+)
+from collector.cli.collect import EXIT_ALREADY_RUNNING, main
 
 
 class StubRunner:
@@ -134,6 +137,31 @@ def test_cli_sanitizes_operational_failure(capsys):
     assert exit_code == 1
     captured = capsys.readouterr()
     assert "secret database details" not in captured.err
+
+
+def test_cli_returns_distinct_code_when_shared_lock_is_busy(caplog):
+    class BusyRunner:
+        def run(self, _request, _profile):
+            raise OperationalRunAlreadyRunningError("internal lock detail")
+
+    exit_code = main(
+        [
+            "run",
+            "--start-date",
+            "2026-10-01",
+            "--end-date",
+            "2026-10-01",
+            "--uf",
+            "SP",
+            "--modality",
+            "6",
+        ],
+        runner_factory=lambda _max_pages: BusyRunner(),
+    )
+
+    assert exit_code == EXIT_ALREADY_RUNNING
+    assert "already_running" in caplog.text
+    assert "internal lock detail" not in caplog.text
 
 
 def test_cli_selects_usiar_v2_explicitly(capsys):

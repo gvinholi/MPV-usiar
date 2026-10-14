@@ -35,7 +35,9 @@ def test_timeout_then_success() -> None:
         pages={1: page(1, items=({"id": "ok"},), total_paginas=1, total_registros=1)},
         errors={1: [TransientFetchError("timeout")]},
     )
-    result, delays, _ = _collect(fetcher, RetryPolicy(max_attempts=3, initial_delay_seconds=0.5))
+    result, delays, _ = _collect(
+        fetcher, RetryPolicy(max_attempts=3, initial_delay_seconds=0.5)
+    )
 
     assert result.complete is True
     assert result.items[0]["id"] == "ok"
@@ -43,12 +45,37 @@ def test_timeout_then_success() -> None:
     assert fetcher.calls == [1, 1]
 
 
+def test_retry_observer_receives_sanitizable_attempt_metadata() -> None:
+    fetcher = FakeFetcher(
+        pages={1: page(1, items=(), total_paginas=1, total_registros=0)},
+        errors={
+            1: [TransientFetchError("sensitive transport detail", status_code=503)]
+        },
+    )
+    observed = []
+    delays, waiter = recording_waiter()
+    paginator = PublicationPaginator(
+        fetcher,
+        retry_policy=RetryPolicy(max_attempts=2, initial_delay_seconds=0.25),
+        waiter=waiter,
+        retry_observer=lambda attempt, delay, error: observed.append(
+            (attempt, delay, type(error).__name__, error.status_code)
+        ),
+    )
+
+    paginator.collect(_query())
+
+    assert observed == [(1, 0.25, "TransientFetchError", 503)]
+
+
 def test_transport_then_success() -> None:
     fetcher = FakeFetcher(
         pages={1: page(1, items=({"id": "ok"},), total_paginas=1, total_registros=1)},
         errors={1: [TransientFetchError("conexão")]},
     )
-    result, delays, _ = _collect(fetcher, RetryPolicy(max_attempts=2, initial_delay_seconds=0.1))
+    result, delays, _ = _collect(
+        fetcher, RetryPolicy(max_attempts=2, initial_delay_seconds=0.1)
+    )
 
     assert result.complete is True
     assert delays == [0.1]
@@ -59,7 +86,9 @@ def test_http_500_then_success() -> None:
         pages={1: page(1, items=({"id": "ok"},), total_paginas=1, total_registros=1)},
         errors={1: [TransientFetchError("HTTP 500", status_code=500)]},
     )
-    result, delays, _ = _collect(fetcher, RetryPolicy(max_attempts=2, initial_delay_seconds=0.2))
+    result, delays, _ = _collect(
+        fetcher, RetryPolicy(max_attempts=2, initial_delay_seconds=0.2)
+    )
 
     assert result.complete is True
     assert delays == [0.2]
@@ -70,7 +99,9 @@ def test_http_429_then_success() -> None:
         pages={1: page(1, items=({"id": "ok"},), total_paginas=1, total_registros=1)},
         errors={1: [TransientFetchError("HTTP 429", status_code=429)]},
     )
-    result, delays, _ = _collect(fetcher, RetryPolicy(max_attempts=2, initial_delay_seconds=1.0))
+    result, delays, _ = _collect(
+        fetcher, RetryPolicy(max_attempts=2, initial_delay_seconds=1.0)
+    )
 
     assert result.complete is True
     assert delays == [1.0]
@@ -90,7 +121,9 @@ def test_retries_exhausted() -> None:
     delays, waiter = recording_waiter()
     paginator = PublicationPaginator(
         fetcher,
-        retry_policy=RetryPolicy(max_attempts=3, initial_delay_seconds=0.5, backoff_factor=2),
+        retry_policy=RetryPolicy(
+            max_attempts=3, initial_delay_seconds=0.5, backoff_factor=2
+        ),
         waiter=waiter,
     )
 
@@ -105,7 +138,9 @@ def test_retries_exhausted() -> None:
 
 
 def test_http_400_is_not_retried() -> None:
-    fetcher = FakeFetcher(errors={1: [PermanentFetchError("HTTP 400", status_code=400)]})
+    fetcher = FakeFetcher(
+        errors={1: [PermanentFetchError("HTTP 400", status_code=400)]}
+    )
     delays, waiter = recording_waiter()
     paginator = PublicationPaginator(
         fetcher, retry_policy=RetryPolicy(max_attempts=3), waiter=waiter

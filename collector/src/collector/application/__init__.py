@@ -93,6 +93,8 @@ from collector.application.persistence import (
 )
 from collector.application.operational import (
     OperationalCollectionRunner,
+    OperationalRunAlreadyRunningError,
+    OperationalRunLock,
     OperationalRunRepository,
     OperationalRunSummary,
     RoundObservation,
@@ -117,6 +119,7 @@ from collector.application.screening import (
     usiar_v1,
     usiar_v2,
 )
+from collector.application.scheduling import CollectionWindow, DailyCollectionSchedule
 from collector.application.resolution import (
     RESOLVER_ENGINE_VERSION,
     DocumentStrength,
@@ -191,11 +194,13 @@ __all__ = [
     "CollectionRepository",
     "CatalogProcessDocuments",
     "CollectionResult",
+    "CollectionWindow",
     "ConsolidatedProcess",
     "ConsolidationError",
     "ConsolidationResult",
     "DEFAULT_MAX_PAGES",
     "DocumentCatalogError",
+    "DailyCollectionSchedule",
     "DocumentCatalogIssue",
     "DocumentCatalogRepository",
     "DocumentCatalogResult",
@@ -232,6 +237,8 @@ __all__ = [
     "InitialScreeningRequiredError",
     "OperationalReasonCode",
     "OperationalCollectionRunner",
+    "OperationalRunAlreadyRunningError",
+    "OperationalRunLock",
     "OperationalRunRepository",
     "OperationalRunSummary",
     "OperationalResolution",
