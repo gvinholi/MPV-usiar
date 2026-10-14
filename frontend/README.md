@@ -1,8 +1,53 @@
 # Frontend USIAR
 
-Next.js 16 App Router, React 19, TypeScript strict, Tailwind CSS 4 e componentes shadcn/ui sobre Radix. O servidor Next.js é o BFF. Nenhum ORM, conexão PostgreSQL, coletor ou regra USIAR foi adicionado ao frontend.
+Next.js 16 App Router, React 19 e TypeScript strict sobre Cloudflare Workers/OpenNext. O servidor Next.js consulta o PostgreSQL internamente; o mesmo Worker executa o coletor PNCP TypeScript por Cloudflare Cron. A interface e as 12 colunas UsiAr foram preservadas.
 
-## Execução local
+## Runtime Cloudflare + Supabase (Commit 31)
+
+- Supabase Auth fornece login por e-mail/senha, recuperação e cookies `HttpOnly`; signup público não existe.
+- `app_admins` é uma allowlist explícita. Criar um usuário no Supabase Auth não concede acesso ao sistema.
+- `DATABASE_URL` usa conexão direta ou o **Session Pooler** do Supabase. Hyperdrive e Transaction Pooler não podem ser usados pelo coletor porque não preservam o advisory lock de sessão.
+- `custom-worker.ts` reutiliza o handler OpenNext e adiciona Cron às 09:00, 15:00 e 21:00 UTC (06:00, 12:00 e 18:00 em Brasília no regime atual).
+- O coletor persiste cada observação em transação própria, preserva snapshots e triagens existentes, e reporta teto/timeout como `PARTIAL`, nunca `SUCCESS` silencioso.
+- O Python permanece no repositório como rollback/referência e continua sendo a fonte das migrations Alembic 0001–0011.
+
+Não coloque segredos em `.env.example`, `wrangler.jsonc` ou no Git. Configure `DATABASE_URL`, `SUPABASE_URL` e `SUPABASE_ANON_KEY` no ambiente do Worker. A service role é usada somente na estação administrativa para conceder a allowlist e nunca é configurada no Worker.
+
+```powershell
+cd frontend
+npm.cmd ci
+Copy-Item .env.example .env.local
+# preencha .env.local fora do Git
+npm.cmd run dev
+
+# build/preview no runtime Workers
+npm.cmd run build:worker
+npm.cmd run preview:worker
+```
+
+Após criar manualmente a única conta piloto no painel Supabase Auth, aplique a migration 0011 e conceda acesso sem conhecer ou transportar a senha:
+
+```powershell
+$env:SUPABASE_SERVICE_ROLE_KEY = "<secret somente nesta sessão>"
+npm.cmd run admin:grant -- admin@empresa.example
+Remove-Item Env:SUPABASE_SERVICE_ROLE_KEY
+```
+
+O deploy é deliberadamente manual: `npm.cmd run deploy:worker`. Antes de habilitá-lo, valide uma coleta real controlada; o tempo total de paginação sob o limite de 15 minutos do Cron ainda depende do volume real do PNCP.
+
+O bundle OpenNext deve ser validado em Linux/CI. No Windows, o próprio adaptador alerta sobre compatibilidade incompleta e pode falhar ao criar os links simbólicos do bundle; isso não deve ser interpretado como validação do runtime Cloudflare.
+
+`npm audit --omit=dev` não encontrou vulnerabilidades na árvore de produção em 14/10/2026. O audit completo ainda reporta 9 ocorrências altas somente nas cadeias de desenvolvimento: `braces` via ESLint e `glob` via OpenNext/@node-minify. As correções automáticas propostas são mudanças incompatíveis (downgrade do `eslint-config-next` ou troca forçada do adaptador), portanto não foram aplicadas sem validação upstream.
+
+### Custo e limites do piloto
+
+O coletor não é compatível com os 10 ms de CPU e 50 subrequests externos por invocação do Workers Free. O piloto requer **Workers Paid**, atualmente com mínimo de US$ 5/mês, para obter o teto de Cron e subrequests compatíveis; ainda assim cada Cron tem 15 minutos de wall time e a medição real da coleta continua obrigatória. Supabase Free pode atender ao piloto inicial se o banco permanecer abaixo de 500 MB e das demais cotas do plano. Não há dependência de Hyperdrive, Durable Objects ou outro serviço pago adicional neste desenho.
+
+## Referência do runtime anterior
+
+> As seções abaixo documentam o runtime Python/FastAPI e os modos `internal`/OIDC preservados exclusivamente para rollback. Eles não ficam ativos junto com Supabase Auth em produção. Para executar o Commit 31, use somente a seção **Runtime Cloudflare + Supabase** acima.
+
+## Execução local do rollback
 
 Requer Node.js **24.x** e npm. Use o checkout existente; não execute `git init`.
 

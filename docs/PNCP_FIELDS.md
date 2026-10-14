@@ -17,7 +17,7 @@ vigente pode ser consultado no
 | TIPO | `modality` | `modalidadeNome` | Modalidade oficial da contratação. |
 | SITE | `official_url` | `linkSistemaOrigem` | Só é exposto se for HTTP(S) público e não contiver credenciais/parâmetros sensíveis. |
 | N EDITAL | `notice_number` | indisponível no contrato atual | Permanece `null`; `numeroCompra`, `numeroControlePNCP` e `processo` não são substitutos automáticos. |
-| TIPO DO SERVIÇO | descrição/triagem existentes | `objetoCompra` + USIAR/v1 | O PNCP não fornece a categoria comercial da UsiAr como campo estruturado. |
+| TIPO DO SERVIÇO | descrição/triagem existentes | `objetoCompra` + USIAR/v2 | O PNCP não fornece a categoria comercial da UsiAr como campo estruturado; a tela usa estado, motivo e evidências auditáveis sem inventar categoria. |
 | VALOR MENSAL | indisponível | — | Não é derivado do valor total. |
 | VALOR ESTIMADO | `estimated_value` | `valorTotalEstimado` | Decimal oficial; nullable. |
 | OBSERVAÇÃO | indisponível como campo PNCP único | — | Não é fabricada a partir de informações complementares. |

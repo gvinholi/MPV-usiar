@@ -1593,3 +1593,48 @@ Logs JSON reutilizam `collection_rounds` e o resumo operacional. O resumo agora 
 páginas processadas e erros de página; retries em falhas transitórias registram tentativa,
 delay, tipo e status HTTP, sem mensagem bruta. O procedimento de ativação, recuperação,
 backfill e limites geográficos está em `docs/SCHEDULER.md`.
+
+---
+
+## 51. Runtime TypeScript, Supabase Auth e Cloudflare Workers
+
+O runtime alvo do MVP passa a ser um único Cloudflare Worker gerado por OpenNext a partir
+do Next.js 16. O entrypoint customizado preserva o handler HTTP e acrescenta o evento
+`scheduled`. A interface, rotas e tabela UsiAr não são reconstruídas. Consultas de
+dashboard e oportunidades continuam server-side, agora diretamente no PostgreSQL e com
+os mesmos schemas Zod; nenhum token ou `DATABASE_URL` é serializado para o navegador.
+
+Supabase Auth substitui a autenticação ativa. Login, logout, callback de recuperação e
+troca de senha usam cookies `HttpOnly`, `Secure` em produção e `SameSite=Lax`. Não há
+signup público. Uma identidade autenticada só entra quando `(user_id,email)` está ativa
+em `app_admins`, tabela introduzida pela migration 0011. O usuário é criado manualmente
+no Supabase; o script administrativo apenas concede acesso a um usuário já existente e
+exige service role fora do Worker. O código Python de autenticação permanece no
+repositório exclusivamente como rollback.
+
+A mesma migration habilita RLS sem criar políticas em todas as tabelas históricas da
+aplicação. Assim, `anon` e usuários Supabase não recebem acesso pela Data API; somente o
+runtime server-side, conectado diretamente como proprietário autorizado, consulta ou
+grava essas tabelas. O downgrade restaura o estado de RLS anterior.
+
+O coletor TypeScript preserva o endpoint PNCP, 204 vazio, validação de metadados,
+paginação completa, retry transitório, mapeamento oficial, snapshots por rodada,
+identidade PNCP, triagem USIAR/v1 e v2, evidências, resolução inicial e reason codes.
+Cada observação confirmada é persistida em sua própria transação, preservando o progresso
+anterior quando uma linha falha, sem atualizar reviews humanas. O lock
+`pg_try_advisory_lock` é mantido numa conexão de sessão durante toda a rodada; por isso
+Hyperdrive e Transaction Pooler são incompatíveis. Deve-se usar conexão direta ou
+Supabase Session Pooler com TLS.
+
+Os Crons são `0 9`, `0 15` e `0 21` UTC, correspondentes aos horários operacionais de
+Brasília no regime vigente. A janela de datas é calculada em `America/Sao_Paulo`.
+`max_pages`, erro de paginação e prazo interno anterior ao teto do Worker produzem
+`PARTIAL`, nunca sucesso truncado. A duração de uma coleta PNCP integral no Worker e a
+necessidade de checkpoint/batches permanecem pendentes de validação real antes do
+deploy. Nenhum recurso de nuvem é criado por este commit.
+
+Workers Free é insuficiente para a coleta completa por limitar cada invocação a 10 ms de
+CPU e 50 subrequests externos. O desenho operacional pressupõe Workers Paid (mínimo
+publicado de US$ 5/mês) e mantém o limite de 15 minutos de wall time por Cron. Supabase
+Free é aceitável somente enquanto banco e tráfego permanecerem dentro das cotas, em
+especial 500 MB de banco; uso deve ser acompanhado durante o piloto.

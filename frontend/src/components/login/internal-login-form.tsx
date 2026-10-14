@@ -6,11 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export function InternalLoginForm({ csrf }: { csrf: string }) {
+export function InternalLoginForm({ csrf: _csrf }: { csrf: string }) {
+  void _csrf;
   const [visible, setVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   return <form action="/auth/login" method="post" className="space-y-5" onSubmit={() => setSubmitting(true)}>
-    <input type="hidden" name="csrf" value={csrf} />
     <div className="space-y-2">
       <Label htmlFor="email">E-mail</Label>
       <Input id="email" name="email" type="email" autoComplete="username" inputMode="email"

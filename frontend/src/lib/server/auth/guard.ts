@@ -1,49 +1,31 @@
 import "server-only";
-import { cookies } from "next/headers";
+import { createHash } from "node:crypto";
 import { redirect } from "next/navigation";
+import { type BearerCredential } from "../api/client";
+import { withDatabase } from "../db";
 import { readEnvironment } from "../env";
-import { cookieSettings, getAuthRuntime } from "./session";
-import { openInternalSession } from "./sealed-cookie";
-import { createApiClient, type BearerCredential } from "../api/client";
-import { ApiError } from "../api/errors";
+import { createSupabaseServerClient } from "./supabase";
 
 export async function requireSession() {
-  let env;
-  try { env = readEnvironment(); } catch { redirect("/login"); }
-  const jar = await cookies();
-  if (env.AUTH_MODE === "internal") {
-    const sealed = jar.get(cookieSettings(env, "internal-session", 0).name)?.value;
-    if (!sealed || !env.authCookieKey) redirect("/login");
-    let session;
-    try { session = openInternalSession(sealed, env.authCookieKey); }
-    catch { redirect("/login?error=session"); }
-    const credential: BearerCredential = {
-      async read() { return session.sessionToken; },
-      async invalidate() { /* Route Handlers own cookies; FastAPI owns validity. */ },
-    };
-    return { env, mode: "internal" as const, credential, browserCsrf: session.browserCsrf };
-  }
-
-  let auth;
-  try { auth = getAuthRuntime(); } catch { redirect("/login"); }
-  const id = jar.get(cookieSettings(env, "session", 0).name)?.value;
-  if (!id) redirect("/login");
-  const session = await auth.store.readSession(id);
-  if (!session) redirect("/login");
+  const env = readEnvironment();
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user?.email) redirect("/login?error=session");
+  const email = data.user.email.toLowerCase();
+  const authorized = await withDatabase(async (db) => {
+    const result = await db.query("SELECT 1 FROM app_admins WHERE user_id=$1 AND email=$2 AND active=true", [data.user.id, email]);
+    return result.rowCount === 1;
+  });
+  if (!authorized) redirect("/login?error=authorization");
   const credential: BearerCredential = {
-    async read() { return (await auth.store.readSession(id))?.accessToken; },
-    async invalidate() { await auth.store.deleteSession(id); },
+    async read() { return data.user.id; },
+    async invalidate() { await supabase.auth.signOut(); },
   };
-  return { env, mode: "oidc" as const, credential, browserCsrf: session.csrf };
+  const browserCsrf = createHash("sha256").update(`${data.user.id}:${data.user.updated_at ?? ""}`).digest("base64url");
+  return { env, mode: "supabase" as const, credential, browserCsrf, user: data.user };
 }
-/** Call at every protected data/page entry, not only in the persistent layout. */
-export async function requireDashboard() {
-  const session = await requireSession();
-  const api = createApiClient(session.env, session.credential);
-  try { await api.ready(); return undefined; }
-  catch (error) {
-    if (error instanceof ApiError && error.status === 401) redirect("/login?error=session");
-    if (error instanceof ApiError) return { message: error.message, requestId: error.requestId };
-    return { message: "Serviço temporariamente indisponível." };
-  }
+
+export async function requireDashboard(): Promise<{ message: string; requestId?: string } | undefined> {
+  await requireSession();
+  return undefined;
 }

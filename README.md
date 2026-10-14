@@ -25,16 +25,16 @@ O piloto **não** automatiza:
 
 ```text
 docs/ARCHITECTURE.md    Contrato arquitetural
-collector/              Coletor Python (domínio, aplicação, infra)
-frontend/               Dashboard Next.js e BFF
+collector/              Python preservado para rollback e migrations Alembic
+frontend/               Next.js, API interna, coletor TypeScript e Worker
 ```
 
-O frontend Next.js está em `frontend/`, com instruções em [frontend/README.md](frontend/README.md).
-A fundação do Commit 20 inclui layout responsivo, BFF OIDC, sessões server-side locais,
-cliente HTTP tipado e testes. Sem provedor configurado, o acesso permanece bloqueado.
-Não há dados fictícios nem escrita de revisões no frontend. Produção depende de um
-SessionStore compartilhado aprovado; a implementação em memória não é habilitada em produção.
-A infraestrutura Google Cloud entra em commits posteriores.
+O runtime alvo do MVP está em `frontend/`, com instruções em [frontend/README.md](frontend/README.md).
+O runtime do Commit 31 usa Next.js/OpenNext no Cloudflare Worker, Supabase Auth, acesso
+server-side ao PostgreSQL e coletor PNCP TypeScript. O frontend existente e as 12 colunas
+UsiAr foram preservados. O Python/FastAPI permanece como rollback e como executor das
+migrations Alembic; seus modos de autenticação antigos não devem coexistir com Supabase
+Auth em produção.
 
 Execução local do frontend (Node.js 24.x e npm):
 
@@ -45,10 +45,15 @@ Copy-Item .env.example .env.local
 npm.cmd run dev
 ```
 
-Abra `http://127.0.0.1:3000`. Configuração OIDC, limitações e verificações estão no README
-do frontend e na [seção 40 do contrato arquitetural](docs/ARCHITECTURE.md#40-fundação-frontend-e-bff).
+Abra `http://127.0.0.1:3000`. As variáveis Supabase, o bootstrap da allowlist, o build
+OpenNext e os comandos Wrangler estão no README do frontend.
 
-## API HTTP
+## Runtime Python/FastAPI preservado para rollback
+
+As seções a seguir descrevem o runtime anterior preservado. Elas não representam o
+caminho de produção do Commit 31 e continuam aqui para permitir rollback auditável.
+
+### API HTTP legada
 
 A API read-only é criada com FastAPI e expõe os recursos de consulta sob `/api/v1`.
 Configure `DATABASE_URL` para execução real e inicie localmente com:
@@ -131,7 +136,7 @@ CORS fica desabilitado por padrão. Para desenvolvimento com um frontend separad
 defina `API_CORS_ORIGINS` como uma lista de origens explícitas separadas por vírgula.
 Wildcard não é aceito e credenciais CORS não são habilitadas.
 
-## Coletor
+### Coletor Python legado
 
 Requer Python 3.13+.
 
@@ -143,7 +148,7 @@ python -m pip install -e ".[dev]"
 python -m pytest -m "not postgres"
 ```
 
-## PostgreSQL local
+### PostgreSQL local para rollback e testes
 
 O banco de desenvolvimento sobe com Docker Compose na porta **5433** (para não conflitar com um PostgreSQL local na 5432). Copie `.env.example` para `.env` e ajuste se necessário. Não commite `.env`.
 

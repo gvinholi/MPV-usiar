@@ -1,6 +1,30 @@
 # Operação das três coletas PNCP diárias
 
-## Estado e estratégia
+## Runtime TypeScript no Cloudflare (Commit 31)
+
+O runtime alvo agora é o handler `scheduled` de `frontend/custom-worker.ts`. Os três
+Crons em `frontend/wrangler.jsonc` usam UTC: `0 9`, `0 15` e `0 21`, correspondentes a
+06:00, 12:00 e 18:00 em Brasília no regime vigente. O cálculo da janela usa
+`America/Sao_Paulo`, e cada disparo força `USIAR/v2`.
+
+O advisory lock é mantido na mesma conexão PostgreSQL durante toda a rodada. Por isso a
+URL deve apontar para conexão direta ou Supabase Session Pooler; Transaction Pooler e
+Hyperdrive não atendem esse contrato. Observações confirmadas são persistidas em transações
+independentes. Limite de páginas, inconsistência do PNCP ou aproximação do limite de 15
+minutos produzem `PARTIAL`; uma falha sem progresso produz `FAILED`.
+
+A duração integral e o volume real continuam **PENDENTES DE VALIDAÇÃO REAL** antes do
+deploy. Se uma rodada normal não couber no limite do Worker, o próximo passo é adicionar
+checkpoint durável/batches, não aumentar silenciosamente o status para `SUCCESS`.
+
+O plano Workers Free não comporta esta carga (10 ms de CPU e 50 subrequests externos por
+invocação). A operação exige Workers Paid, com custo-base atualmente de US$ 5/mês. O
+teto de wall time do Cron permanece 15 minutos mesmo no plano pago; pagar o plano não
+substitui o teste controlado de duração e volume.
+
+O daemon Python abaixo permanece documentado apenas como rollback operacional.
+
+## Estado e estratégia do rollback Python
 
 O repositório não define uma plataforma de produção: há Docker Compose apenas para o
 PostgreSQL local, e não há evidência de Cloud Run, VPS, systemd ou outro supervisor. O
